@@ -1,0 +1,32 @@
+{
+  "rea_version": "6.8.0",
+  "ready": false,
+  "scope": {
+    "mode": "explicit",
+    "clients": [],
+    "providers": [
+      "jadx"
+    ],
+    "skill": false,
+    "target": null
+  },
+  "checks": [
+    {
+      "name": "node",
+      "ok": true,
+      "classification": "healthy",
+      "detail": "24.22.1"
+    },
+    {
+      "name": "jadx",
+      "ok": false,
+      "classification": "missing_analysis_engine",
+      "detail": "Set REA_JADX_MCP_JAR to the absolute path of a caller-supplied jadx-headless-mcp 0.7.1 JAR. REA does not download or install it.",
+      "remediation": "Set REA_JADX_MCP_JAR to the absolute path of a caller-supplied jadx-headless-mcp 0.7.1 JAR. REA does not download or install it."
+    }
+  ],
+  "recorded_on": "2026-11-03",
+  "command": "rea doctor --provider jadx --json",
+  "target_artifact_supplied": false,
+  "original_binary_analysis_performed": false
+}
