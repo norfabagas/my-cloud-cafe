@@ -54,6 +54,6 @@ The requested reference is [My Cafe — Restaurant Game](https://play.google.com
 
 ## Data
 
-Supabase migrations are in `supabase/migrations/`. `cafe_saves` stores one JSON game save per authenticated user, protected by row-level security. A security-invoker RPC performs revision-checked saves, rejecting stale writes from another device. Offline changes remain queued locally until a connection succeeds. Conflicts are resolved by the player rather than merging currency or applying silent last-write-wins.
+Supabase migrations are in `supabase/migrations/`. Every game-owned table uses the `mcc_` prefix. `mcc_cafe_saves` stores one JSON game save per authenticated user, protected by row-level security. A security-invoker RPC performs revision-checked saves, rejecting stale writes from another device. Offline changes remain queued locally until a connection succeeds. Conflicts are resolved by the player rather than merging currency or applying silent last-write-wins.
 
 Guest and signed-in progress use separate local storage slots. Signing out returns to the guest game. Game state is client-authoritative for this single-player game; it must not be reused as a trusted competitive score or monetary balance.

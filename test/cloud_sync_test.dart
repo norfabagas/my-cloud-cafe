@@ -55,7 +55,7 @@ class Dependency {
           jsonEncode({'code': '503', 'message': 'dependency unavailable'}),
         );
       } else if (request.method == 'GET' &&
-          request.uri.path == '/rest/v1/cafe_saves') {
+          request.uri.path == '/rest/v1/mcc_cafe_saves') {
         request.response.write(
           jsonEncode([
             {

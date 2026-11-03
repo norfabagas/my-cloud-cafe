@@ -21,7 +21,9 @@ The smoke test serves the actual release locally, uses a fresh browser context, 
 
 The existing `niceblue` project was selected after the account's two-project free limit prevented a dedicated project. Only game-specific database objects were added.
 
-Live database checks confirmed `cafe_saves` has RLS enabled, `anon` cannot read it, and authenticated users have the required table privileges. SELECT/INSERT/UPDATE policies compare `auth.uid()` with `owner_id`, including UPDATE's WITH CHECK. The revision-checked RPC is SECURITY INVOKER and accepts `p_state` and `p_expected_revision`.
+Live database checks confirmed `mcc_cafe_saves` has RLS enabled, `anon` cannot read it, and authenticated users have the required table privileges. SELECT/INSERT/UPDATE policies compare `auth.uid()` with `owner_id`, including UPDATE's WITH CHECK. The revision-checked RPC is SECURITY INVOKER and accepts `p_state` and `p_expected_revision`.
+
+The `prefix_mcc_tables` migration renamed the existing game table to `mcc_cafe_saves` and updated the RPC without rebuilding the table. A live transaction verified inserts, revision conflicts, owner isolation, owner reassignment rejection and anonymous access denial, then rolled back its test rows.
 
 The client captures and explicitly binds each HTTP request's bearer token to its initiating account. A real SDK request against a local HTTP dependency proved that switching the active account during a write does not change the request identity. A second local HTTP scenario exercised unavailable reads, pending local saves, successful retries and explicit conflict resolution. These transport tests use controlled responses from the implemented RPC contract; they do not validate email delivery or a real user's login credentials.
 

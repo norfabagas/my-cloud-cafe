@@ -39,7 +39,7 @@ class CloudService {
   Future<CloudSnapshot?> read(String ownerId) async {
     final token = _tokenFor(ownerId);
     final row = await client
-        .from('cafe_saves')
+        .from('mcc_cafe_saves')
         .select('state,revision,updated_at')
         .eq('owner_id', ownerId)
         .setHeader('Authorization', 'Bearer $token')
