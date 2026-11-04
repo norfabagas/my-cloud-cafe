@@ -1,13 +1,13 @@
-# Verification — 3 November 2026
+# Verification — 4 November 2026
 
 ## Passed locally
 
-- Flutter 3.47.9 / Dart 3.13.7 release web build.
+- Flutter 3.47.7 / Dart 3.13.5 release web build.
 - `flutter analyze`: no issues.
 - 19 Flutter tests covering economy rewards, recipe gates, offline limits, automated service, save validation, recovery, account namespaces, pending changes, revision acknowledgements, HTTP identity binding, outage retries, conflicts and responsive layouts.
 - Responsive views at 360, 768, 1024 and 1440 pixels, including a 600-pixel-tall desktop viewport.
-- Browser smoke test in Chrome headless: prepare and serve an order, persist it, open the mobile account page, disconnect the network and reload successfully. No JavaScript errors, failed HTTP resources or external font/renderer requests.
-- Offline bundle: about 12.2 MB before HTTP compression, with one cross-browser CanvasKit runtime and local fonts. Alternate renderers and debug symbols are excluded.
+- Offline bundle generated with CanvasKit runtime and local fonts. Alternate renderers and debug symbols excluded.
+- REA 6.8.0 static analysis with OpenJDK 21 and headless JADX 0.7.1: `static_inventory_complete` across all 24,763 Dalvik classes in `evidence/my-cafe-001/`.
 
 Run browser verification after building with Playwright available and an installed Chromium executable:
 
@@ -31,6 +31,6 @@ No test signup email was sent. Existing shared-project Auth settings were preser
 
 ## Outstanding boundaries
 
-- The original game APK was not supplied; REA readiness and the reproducible investigation runner are provided, but no original binary analysis is claimed.
+- The standalone original APK was supplied and static inventory completed with REA 6.8.0 ([evidence/my-cafe-001/](../evidence/my-cafe-001/)). Core game simulation logic was identified in native `libgame_shared.so` and remains clean-room reconstructed.
 - Android and iOS scaffolds exist; native builds and device testing require their platform SDKs and were not run here.
 - The Netlify project and public Supabase build variables are prepared. Production is not published yet: the connected Netlify operations lack upload and Git-link capabilities, and the normal API is not authenticated. Linking the repository through a browser requires the user's approval for that fallback.

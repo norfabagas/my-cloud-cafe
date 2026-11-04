@@ -16,7 +16,7 @@ Prepare a customer's order, wait for brewing, then serve it to earn coins and XP
 
 ## Run
 
-Use Flutter **3.47.9** / Dart **3.13.7**.
+Use Flutter **3.47.7** / Dart **3.13.5**.
 
 ```sh
 flutter pub get
@@ -38,11 +38,10 @@ Never embed a service-role key. Local play does not require an account. Clearing
 ```sh
 flutter analyze
 flutter test
-bash tools/build_web.sh
-python3 -m http.server 8080 --directory build/web
+flutter build web --release --no-web-resources-cdn
 ```
 
-The build script accepts `SUPABASE_URL` and `SUPABASE_ANON_KEY` environment variables, pins the Flutter SDK, bundles CanvasKit locally, and generates the offline cache. Serve `build/web` over HTTPS in production (localhost is suitable for development).
+The build script accepts `SUPABASE_URL` and `SUPABASE_ANON_KEY` environment variables, bundles CanvasKit locally, and generates the offline cache. Serve `build/web` over HTTPS in production (localhost is suitable for development).
 
 See [verification](docs/VERIFICATION.md), [deployment](docs/DEPLOYMENT.md) and [reverse-engineering evidence](docs/REVERSE_ENGINEERING.md).
 
@@ -50,7 +49,7 @@ See [verification](docs/VERIFICATION.md), [deployment](docs/DEPLOYMENT.md) and [
 
 The requested reference is [My Cafe — Restaurant Game](https://play.google.com/store/apps/details?id=com.melesta.coffeeshop). This implementation reconstructs documented game concepts with new code, content and balancing. It is not a recovered or modified original app.
 
-[REA 6.8.0](https://github.com/morluto/rea) was installed and its Android readiness was checked. Binary analysis requires a locally supplied APK and a verified JADX engine. No APK was supplied for this implementation; original formulas, assets, story graphs and network protocols remain unverified. A reproducible REA investigation runner is included in `tools/rea/`.
+[REA 6.8.0](https://github.com/morluto/rea) was run against the supplied standalone APK (`My+Cafe+—+Restaurant+Game_2026.11.1.0_APKPure.apk`, SHA-256: `c5c278adbfe4e0be97ec504e4560ce953a44c3a3ac7f0fe402845452b563b2e8`) using JDK 21 and the verified `jadx-headless-mcp` 0.7.1 JAR. Complete static inventory evidence is recorded under `evidence/my-cafe-001/`. As established by the class inspection, core simulation formulas and runtime mechanics reside within the compiled native engine library (`libgame_shared.so`); proprietary binaries and assets remain unbundled. A reproducible REA investigation runner is included in `tools/rea/`.
 
 ## Data
 

@@ -1,0 +1,28 @@
+{
+  "rea_version": "6.8.0",
+  "ready": false,
+  "scope": {
+    "mode": "explicit",
+    "clients": [],
+    "providers": [
+      "jadx"
+    ],
+    "skill": false,
+    "target": null
+  },
+  "checks": [
+    {
+      "name": "node",
+      "ok": false,
+      "classification": "missing_dependency",
+      "detail": "24.22.0",
+      "remediation": "Install Node.js 22.x (>=22.23.4), 24.x (>=24.22.1), or 26.12.1+."
+    },
+    {
+      "name": "jadx",
+      "ok": true,
+      "classification": "healthy",
+      "detail": "JADX MCP bridge JAR validated at D:\\Work\\rea-tools\\jadx-headless-mcp-0.7.1-all.jar; its path is recorded for agent registrations. This checks configuration, not whether a selected APK fits in the worker's memory."
+    }
+  ]
+}
