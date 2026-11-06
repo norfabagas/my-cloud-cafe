@@ -24,13 +24,15 @@ Use Flutter **3.47.7** / Dart **3.13.5**.
 
 ```sh
 flutter pub get
-flutter run -d chrome
+flutter run -d chrome --web-hostname=localhost --web-port=3030 --dart-define-from-file=.env.local.json
 ```
 
-Pass the existing project's public URL and publishable (or legacy anon) key. Add the exact application origin to Supabase Auth's Redirect URLs. Google is already enabled on the configured project; email/password is disabled.
+Default local origin: **http://localhost:3030**. Copy `.env.example` to the ignored `.env.local.json` and fill the existing project's public key. The VS Code launch profile uses the same port. On Windows, `./tools/run_web.ps1` starts the web server on 3030 (`-Release` selects release mode).
+
+Pass the existing project's public URL and publishable (or legacy anon) key. Add `http://localhost:3030` and the production origin to Supabase Auth's Redirect URLs. Google is already enabled on the configured project; email/password is disabled.
 
 ```sh
-flutter run -d chrome \
+flutter run -d chrome --web-hostname=localhost --web-port=3030 \
   --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
   --dart-define=SUPABASE_ANON_KEY=YOUR_PUBLIC_KEY
 ```

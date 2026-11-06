@@ -47,6 +47,8 @@ The release browser Auth fixture passed OAuth navigation, PKCE code-verifier exc
 
 The live authorization endpoint and its newly generated PKCE flow confirmed the production origin was not initially in Redirect URLs: the recorded referrer fell back to `http://localhost:3000`. Adding `https://my-cloud-cafe.netlify.app` to the existing allowlist is required before publishing this login-required build. The Supabase plugin has no Auth configuration write tool, the CLI has no access token, and Windows Computer Use rejected URL verification; the exact dashboard change was requested from the project owner.
 
+The default development port is 3030 in both `tools/run_web.ps1` and `.vscode/launch.json`. The local release server returned HTTP 200 at `http://localhost:3030`; a fresh Chromium context showed Google login, no unauthenticated game controls and no JavaScript errors. Public Supabase client configuration is kept in ignored `.env.local.json`.
+
 ## Outstanding boundaries
 
 - The standalone original APK was supplied and static inventory completed with REA 6.8.0 ([evidence/my-cafe-001/](../evidence/my-cafe-001/)). Core game simulation logic was identified in native `libgame_shared.so` and remains clean-room reconstructed.

@@ -54,7 +54,7 @@ Existing saves migrate their embedded chairs, customer identities, tools and pen
 
 The configured project `dhkgygjsuamelcfnwvlg` already enables Google. Reuse that provider and its OAuth client. No new project, API key, password provider, or database migration is needed.
 
-In Authentication → URL Configuration → Redirect URLs, add `https://my-cloud-cafe.netlify.app`. Keep existing entries and the shared project's Site URL. The app requests its own origin as `redirectTo`, and Supabase Flutter handles the PKCE callback and persisted session. For local development, use a fixed web port and allow that local origin separately.
+In Authentication → URL Configuration → Redirect URLs, add `https://my-cloud-cafe.netlify.app` and `http://localhost:3030`. Keep existing entries and the shared project's Site URL. The app requests its own origin as `redirectTo`, and Supabase Flutter handles the PKCE callback and persisted session. The PowerShell launcher and VS Code profile default to localhost:3030.
 
 Before release, verify the production origin is accepted by the hosted authorization endpoint. At the initial inspection on 6 November, the requested cafe redirect was not allowlisted and the server selected `http://localhost:3000`; the required origin addition was requested from the project owner. Do not publish the mandatory-login build until the callback is verified.
 
