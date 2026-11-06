@@ -179,7 +179,12 @@ class CloudController extends ChangeNotifier {
       s.machines.length > 1 ||
       s.stories.isNotEmpty ||
       s.claimedGoals.isNotEmpty ||
-      s.decor.length != 3 ||
+      s.decor.length != 5 ||
+      s.decor.map((d) => '${d.kind}:${d.x}:${d.y}').join(';') !=
+          CafeState(0).decor.map((d) => '${d.kind}:${d.x}:${d.y}').join(';') ||
+      s.toolPositions['coffee']?.x != 1 ||
+      s.toolPositions['coffee']?.y != 0 ||
+      s.disabledMenu.isNotEmpty ||
       s.theme != 'sage';
 
   Future<void> sync() async {

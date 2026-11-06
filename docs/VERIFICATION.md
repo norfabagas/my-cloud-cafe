@@ -1,10 +1,10 @@
-# Verification — 4 November 2026
+# Verification — 6 November 2026
 
 ## Passed locally
 
 - Flutter 3.47.7 / Dart 3.13.5 release web build.
 - `flutter analyze`: no issues.
-- 19 Flutter tests covering economy rewards, recipe gates, offline limits, automated service, save validation, recovery, account namespaces, pending changes, revision acknowledgements, HTTP identity binding, outage retries, conflicts and responsive layouts.
+- 30 Flutter tests covering economy rewards, ingredient sequencing, tool contention, staff roles/rest and manual handoff, menu availability, visitor identity, legacy saves, table-supported tools, recovery, account isolation, HTTP identity binding, cloud conflicts, pinch zoom without rotation, dragging after zoom, paths and popup layouts.
 - Responsive views at 360, 768, 1024 and 1440 pixels, including a 600-pixel-tall desktop viewport.
 - Offline bundle generated with CanvasKit runtime and local fonts. Alternate renderers and debug symbols excluded.
 - REA 6.8.0 static analysis with OpenJDK 21 and headless JADX 0.7.1: `static_inventory_complete` across all 24,763 Dalvik classes in `evidence/my-cafe-001/`.
@@ -16,6 +16,16 @@ CHROME_PATH=/path/to/chrome-headless-shell node tools/qa/browser_smoke.cjs
 ```
 
 The smoke test serves the actual release locally, uses a fresh browser context, and writes temporary evidence under ignored `build/qa/`.
+
+The release browser run passed desktop espresso service, mobile account popup, offline reload with preserved progress, a seeded two-ingredient latte, rejected milk-before-espresso, no premature serving, and hiring exactly three staff. Animated scene screenshots changed between samples. No JavaScript errors, failed HTTP resources, or external font/renderer requests occurred. Browser frame callbacks over 90 samples had a median interval of 8.3 ms, p95 16.7 ms, and no interval above 50 ms on this machine. This measures browser frame scheduling, not a guarantee for other devices or GPU render time.
+
+## Customer registry
+
+`mcc_customers` registers fictional customers from accepted cloud snapshots using a SECURITY INVOKER trigger. Registration and revision checking share a transaction; a rejected stale save cannot mutate customer rows. Guests keep their registry locally. Signed-in changes are saved locally and queued for the existing periodic cloud sync.
+
+`tools/qa/customer_registry.cjs` passed on PGlite 0.5.15 (Postgres) and is included in CI. It checks initial registration, revisit upsert, stale-save atomicity, cross-account reads/writes, owner reassignment and anonymous denial. Run it with `PGLITE_MODULE` pointing to an installed `@electric-sql/pglite` module.
+
+The additive registry migration was applied to the existing project. `supabase/verify_customer_registry.sql` passed against the live database and rolled back every test write. RLS, explicit grants, ownership predicates and the save trigger were checked. The shared project's pre-existing advisors include unrelated application objects and platform settings; this change does not modify those objects.
 
 ## Supabase
 
@@ -33,4 +43,4 @@ No test signup email was sent. Existing shared-project Auth settings were preser
 
 - The standalone original APK was supplied and static inventory completed with REA 6.8.0 ([evidence/my-cafe-001/](../evidence/my-cafe-001/)). Core game simulation logic was identified in native `libgame_shared.so` and remains clean-room reconstructed.
 - Android and iOS scaffolds exist; native builds and device testing require their platform SDKs and were not run here.
-- The Netlify project and public Supabase build variables are prepared. Production is not published yet: the connected Netlify operations lack upload and Git-link capabilities, and the normal API is not authenticated. Linking the repository through a browser requires the user's approval for that fallback.
+- Production is hosted at https://my-cloud-cafe.netlify.app through the authenticated Netlify CLI. The connected plugin verifies deployment status. Native touch performance and Android/iOS device builds remain untested; Flutter touch gestures are covered by widget tests and web behavior by Chromium.

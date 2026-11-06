@@ -1,117 +1,269 @@
 import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
-
+import '../game/catalog.dart';
+import '../game/engine.dart';
 import '../game/state.dart';
 
-class CafeScene extends StatelessWidget {
+/// The fixed isometric camera scales and pans, but never rotates.
+/// Foreground animation repaints independently of simulation and persistence.
+class CafeScene extends StatefulWidget {
   final CafeState state;
+  final GameEngine? engine;
   final bool editing;
-  final int? selected;
-  final void Function(int x, int y)? onTile;
+  final int? selected, selectedOrder;
+  final void Function(int, int)? onTile;
+  final void Function(int)? onCustomer;
+  final void Function(String)? onTool;
+  final void Function(int?, String?, int, int)? onMove;
   const CafeScene({
     super.key,
     required this.state,
+    this.engine,
     this.editing = false,
     this.selected,
+    this.selectedOrder,
     this.onTile,
+    this.onCustomer,
+    this.onTool,
+    this.onMove,
   });
   @override
-  Widget build(BuildContext context) => AspectRatio(
-    aspectRatio: 1.65,
-    child: LayoutBuilder(
-      builder: (context, bounds) => Semantics(
-        label:
-            'Denah kafe dengan ${state.capacity} meja dan ${state.orders.length} pelanggan',
-        child: GestureDetector(
-          onTapUp: onTile == null
-              ? null
-              : (tap) {
-                  final scale = math.min(
-                    bounds.maxWidth / 800,
-                    bounds.maxHeight / 470,
-                  );
-                  final dx =
-                      (tap.localPosition.dx - bounds.maxWidth / 2) / scale;
-                  final dy =
-                      (tap.localPosition.dy - bounds.maxHeight * .32) / scale;
-                  final correctedX = (dx / 42 + (dy + 13) / 23) / 2;
-                  final y = ((dy + 13) / 23 - dx / 42) / 2;
-                  onTile!(correctedX.floor(), y.floor());
-                },
-          child: RepaintBoundary(
-            child: CustomPaint(
-              size: Size(bounds.maxWidth, bounds.maxHeight),
-              painter: _CafePainter(state, editing, selected),
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
+  State<CafeScene> createState() => _CafeSceneState();
 }
 
-class _CafePainter extends CustomPainter {
-  final CafeState s;
-  final bool editing;
-  final int? selected;
-  final String fingerprint;
-  _CafePainter(this.s, this.editing, this.selected)
-    : fingerprint =
-          '${s.theme}|${s.staff}|${s.orders.length}|${s.machines.join(',')}|${s.decor.map((d) => '${d.kind}:${d.x}:${d.y}').join(';')}|$editing|$selected';
-  static const wood = Color(0xFFBC8256), edge = Color(0xFF845E44);
-  Offset iso(num x, num y, [num z = 0]) =>
-      Offset((x - y) * 42, (x + y) * 23 - z.toDouble());
-  void poly(Canvas c, List<Offset> p, Color color, {bool stroke = false}) {
-    final path = Path()..addPolygon(p, true);
-    c.drawPath(
-      path,
-      Paint()
-        ..color = color
-        ..style = stroke ? PaintingStyle.stroke : PaintingStyle.fill
-        ..strokeWidth = 1,
+class _CafeSceneState extends State<CafeScene>
+    with SingleTickerProviderStateMixin {
+  late final frames = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 60),
+  )..repeat();
+  final watch = Stopwatch()..start();
+  final transform = TransformationController();
+  int? dragging;
+  String? draggingTool;
+  Offset? preview;
+  Size size = Size.zero;
+  int get now => widget.engine?.now ?? widget.state.lastSeen;
+  @override
+  void dispose() {
+    frames.dispose();
+    transform.dispose();
+    watch.stop();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant CafeScene old) {
+    super.didUpdateWidget(old);
+    if (old.state != widget.state) {
+      dragging = null;
+      draggingTool = null;
+      preview = null;
+    }
+  }
+
+  Offset world(Offset p) {
+    final scale = math.min(size.width / 800, size.height / 560);
+    return (p - Offset(size.width / 2, size.height * .28)) / scale;
+  }
+
+  Offset tile(Offset p) {
+    final v = world(p);
+    return Offset(
+      ((v.dx / 42 + (v.dy + 13) / 23) / 2).floorToDouble(),
+      (((v.dy + 13) / 23 - v.dx / 42) / 2).floorToDouble(),
     );
   }
 
-  void box(
+  String? toolAt(Offset p) {
+    final v = world(p);
+    return widget.state.toolPositions.entries
+        .where(
+          (e) => (iso(e.value.x + .5, e.value.y + .5, 67) - v).distance < 25,
+        )
+        .firstOrNull
+        ?.key;
+  }
+
+  int? furnitureAt(Offset p) {
+    final point = world(p);
+    final hits = widget.state.decor.indexed
+        .where(
+          (e) =>
+              (iso(e.$2.x + .5, e.$2.y + .5, e.$2.kind == 'chair' ? 32 : 48) -
+                      point)
+                  .distance <
+              32,
+        )
+        .toList();
+    hits.sort(
+      (a, b) => (iso(a.$2.x + .5, a.$2.y + .5, 45) - point).distance.compareTo(
+        (iso(b.$2.x + .5, b.$2.y + .5, 45) - point).distance,
+      ),
+    );
+    return hits.firstOrNull?.$1;
+  }
+
+  void tap(Offset p) {
+    if (widget.editing) {
+      final tool = toolAt(p);
+      if (tool != null) {
+        widget.onTool?.call(tool);
+        return;
+      }
+      final i = furnitureAt(p);
+      if (i != null) {
+        final d = widget.state.decor[i];
+        widget.onTile?.call(d.x, d.y);
+        return;
+      }
+      final t = tile(p);
+      widget.onTile?.call(t.dx.toInt(), t.dy.toInt());
+      return;
+    }
+    final tool = toolAt(p);
+    if (tool != null) {
+      widget.onTool?.call(tool);
+      return;
+    }
+    final v = world(p),
+        o = widget.state.orders
+            .where(
+              (o) => (iso(o.seatX + .5, o.seatY + .5, 65) - v).distance < 44,
+            )
+            .firstOrNull;
+    if (o != null) widget.onCustomer?.call(o.id);
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, b) {
+      size = Size(b.maxWidth, b.maxHeight);
+      return ClipRect(
+        child: InteractiveViewer(
+          key: const ValueKey('cafe-camera'),
+          transformationController: transform,
+          minScale: .7,
+          maxScale: 2.8,
+          boundaryMargin: const EdgeInsets.all(180),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (d) => tap(d.localPosition),
+            onLongPressStart: widget.editing
+                ? (d) {
+                    final t = tile(d.localPosition);
+                    setState(() {
+                      draggingTool = toolAt(d.localPosition);
+                      dragging = draggingTool == null
+                          ? (furnitureAt(d.localPosition) ??
+                                widget.state.decor.indexWhere(
+                                  (v) => v.x == t.dx && v.y == t.dy,
+                                ))
+                          : null;
+                      if (dragging == -1) dragging = null;
+                      preview = t;
+                    });
+                  }
+                : null,
+            onLongPressMoveUpdate: widget.editing
+                ? (d) => setState(() => preview = tile(d.localPosition))
+                : null,
+            onLongPressEnd: widget.editing
+                ? (d) {
+                    if (preview != null &&
+                        (dragging != null || draggingTool != null)) {
+                      widget.onMove?.call(
+                        dragging,
+                        draggingTool,
+                        preview!.dx.toInt(),
+                        preview!.dy.toInt(),
+                      );
+                    }
+                    setState(() {
+                      dragging = null;
+                      draggingTool = null;
+                      preview = null;
+                    });
+                  }
+                : null,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                RepaintBoundary(
+                  child: CustomPaint(
+                    painter: RoomPainter(widget.state, widget.editing),
+                  ),
+                ),
+                RepaintBoundary(
+                  child: CustomPaint(
+                    painter: PeoplePainter(
+                      widget.state,
+                      widget.engine,
+                      frames,
+                      watch,
+                      () => now,
+                      widget.selectedOrder,
+                      preview,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+Offset iso(num x, num y, [num z = 0]) =>
+    Offset((x - y) * 42, (x + y) * 23 - z.toDouble());
+
+class RoomPainter extends CustomPainter {
+  final CafeState s;
+  final bool editing;
+  final String fingerprint;
+  RoomPainter(this.s, this.editing)
+    : fingerprint =
+          '${s.theme}|$editing|${s.decor.map((d) => '${d.kind}:${d.x}:${d.y}').join(';')}|${s.toolPositions.entries.map((e) => '${e.key}:${e.value.x}:${e.value.y}').join(';')}';
+  static void setup(Canvas c, Size size) {
+    c.translate(size.width / 2, size.height * .28);
+    c.scale(math.min(size.width / 800, size.height / 560));
+  }
+
+  static void poly(
+    Canvas c,
+    List<Offset> points,
+    Color color, {
+    bool stroke = false,
+  }) => c.drawPath(
+    Path()..addPolygon(points, true),
+    Paint()
+      ..color = color
+      ..style = stroke ? PaintingStyle.stroke : PaintingStyle.fill
+      ..strokeWidth = 1,
+  );
+  static void box(
     Canvas c,
     double x,
     double y,
     double w,
     double d,
     double h,
-    Color top,
-    Color front,
-    Color side, [
-    double z = 0,
+    Color color, [
+    double z = 13,
   ]) {
     final a = iso(x, y, z),
         b = iso(x + w, y, z),
         e = iso(x + w, y + d, z),
-        f = iso(x, y + d, z);
-    final up = Offset(0, -h);
-    poly(c, [b, e, e + up, b + up], side);
-    poly(c, [e, f, f + up, e + up], front);
-    poly(c, [a + up, b + up, e + up, f + up], top);
+        f = iso(x, y + d, z),
+        up = Offset(0, -h);
+    poly(c, [b, e, e + up, b + up], Color.lerp(color, Colors.black, .22)!);
+    poly(c, [e, f, f + up, e + up], Color.lerp(color, Colors.black, .12)!);
+    poly(c, [a + up, b + up, e + up, f + up], color);
   }
 
-  void line(Canvas c, Offset a, Offset b, Color color, [double width = 2]) =>
-      c.drawLine(
-        a,
-        b,
-        Paint()
-          ..color = color
-          ..strokeWidth = width
-          ..strokeCap = StrokeCap.round,
-      );
-  void text(
-    Canvas c,
-    String value,
-    Offset p,
-    double size,
-    Color color, {
-    FontWeight weight = FontWeight.w700,
-  }) {
+  static void text(Canvas c, String value, Offset p, double size, Color color) {
     final t = TextPainter(
       text: TextSpan(
         text: value,
@@ -119,7 +271,7 @@ class _CafePainter extends CustomPainter {
           fontFamily: 'CafeSans',
           fontSize: size,
           color: color,
-          fontWeight: weight,
+          fontWeight: FontWeight.w700,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -127,59 +279,49 @@ class _CafePainter extends CustomPainter {
     t.paint(c, p - Offset(t.width / 2, t.height / 2));
   }
 
+  static void line(
+    Canvas c,
+    Offset a,
+    Offset b,
+    Color color, [
+    double width = 2,
+  ]) => c.drawLine(
+    a,
+    b,
+    Paint()
+      ..color = color
+      ..strokeWidth = width
+      ..strokeCap = StrokeCap.round,
+  );
   @override
   void paint(Canvas c, Size size) {
-    final scale = math.min(size.width / 800, size.height / 470);
     c.save();
-    c.translate(size.width / 2, size.height * .32);
-    c.scale(scale);
+    setup(c, size);
+    const wood = Color(0xFFC3996A),
+        floor = Color(0xFFEBDDC7),
+        green = Color(0xFF496D5B);
     final wall = s.theme == 'terracotta'
-        ? const Color(0xFFE5B3A0)
+        ? const Color(0xFFE1AF96)
         : s.theme == 'midnight'
-        ? const Color(0xFF58716E)
-        : const Color(0xFFB8CFC3);
-    final wallSide = Color.lerp(wall, const Color(0xFF375B50), .16)!;
+        ? const Color(0xFF536F70)
+        : const Color(0xFFB4CDBA);
     c.drawOval(
-      Rect.fromCenter(center: const Offset(35, 200), width: 650, height: 195),
+      Rect.fromCenter(center: const Offset(40, 240), width: 650, height: 190),
       Paint()
-        ..color = const Color(0xFF4C6755).withValues(alpha: .10)
+        ..color = const Color(0x1851654B)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18),
     );
-    box(
-      c,
-      0,
-      0,
-      8,
-      6,
-      13,
-      const Color(0xFFEADFC9),
-      const Color(0xFFC4AF8D),
-      const Color(0xFFB29A7E),
-    );
+    box(c, 0, 0, 8, 6, 13, floor, 0);
     for (var x = 0; x < 8; x++) {
       for (var y = 0; y < 6; y++) {
-        final color = (x + y).isEven
-            ? const Color(0xFFF0E6D5)
-            : const Color(0xFFE5D8BF);
-        poly(c, [
+        final p = [
           iso(x, y, 13),
           iso(x + 1, y, 13),
           iso(x + 1, y + 1, 13),
           iso(x, y + 1, 13),
-        ], color);
-        if (editing && y > 0) {
-          poly(
-            c,
-            [
-              iso(x, y, 13),
-              iso(x + 1, y, 13),
-              iso(x + 1, y + 1, 13),
-              iso(x, y + 1, 13),
-            ],
-            const Color(0xFF829B86),
-            stroke: true,
-          );
-        }
+        ];
+        poly(c, p, (x + y).isEven ? const Color(0xFFF2E8D5) : floor);
+        if (editing) poly(c, p, const Color(0xFF8DA48D), stroke: true);
       }
     }
     poly(c, [
@@ -193,337 +335,449 @@ class _CafePainter extends CustomPainter {
       iso(0, 6, 13),
       iso(0, 6, 135),
       iso(0, 0, 135),
-    ], wallSide);
-    line(c, iso(0, 0, 16), iso(8, 0, 16), const Color(0xFF6C8876), 5);
-    line(c, iso(0, 0, 16), iso(0, 6, 16), const Color(0xFF6C8876), 5);
-    // Window panes, sunshine and the back-wall menu are drawn locally.
+    ], Color.lerp(wall, green, .18)!);
     for (final x in [1.0, 3.0, 5.0]) {
       poly(c, [
-        iso(x, 0, 61),
-        iso(x + 1.45, 0, 61),
-        iso(x + 1.45, 0, 119),
-        iso(x, 0, 119),
-      ], const Color(0xFFF8F1D7));
+        iso(x, 0, 66),
+        iso(x + 1.4, 0, 66),
+        iso(x + 1.4, 0, 120),
+        iso(x, 0, 120),
+      ], const Color(0xFFFFF5DA));
       poly(c, [
-        iso(x + .09, 0, 65),
-        iso(x + 1.36, 0, 65),
-        iso(x + 1.36, 0, 115),
-        iso(x + .09, 0, 115),
-      ], const Color(0xFFC6E1DD));
+        iso(x + .08, 0, 70),
+        iso(x + 1.32, 0, 70),
+        iso(x + 1.32, 0, 116),
+        iso(x + .08, 0, 116),
+      ], const Color(0xFFC6E2DE));
       line(
         c,
-        iso(x + .72, 0, 64),
-        iso(x + .72, 0, 117),
-        const Color(0xFFF8F1D7),
+        iso(x + .7, 0, 70),
+        iso(x + .7, 0, 116),
+        const Color(0xFFFFF5DA),
         4,
       );
-      line(c, iso(x, 0, 90), iso(x + 1.45, 0, 90), const Color(0xFFF8F1D7), 4);
-      box(
-        c,
-        x,
-        -.02,
-        1.45,
-        .25,
-        5,
-        const Color(0xFFF8F1D7),
-        const Color(0xFFCEBDA1),
-        const Color(0xFFCEBDA1),
-        60,
-      );
+      line(c, iso(x, 0, 94), iso(x + 1.4, 0, 94), const Color(0xFFFFF5DA), 4);
     }
     poly(c, [
       iso(0, 1, 70),
-      iso(0, 2.8, 70),
-      iso(0, 2.8, 115),
-      iso(0, 1, 115),
-    ], const Color(0xFF88674C));
-    poly(c, [
-      iso(0, 1.08, 74),
-      iso(0, 2.72, 74),
-      iso(0, 2.72, 111),
-      iso(0, 1.08, 111),
-    ], const Color(0xFF314C43));
-    text(c, 'COFFEE', iso(0, 1.9, 99), 12, const Color(0xFFE8DDC1));
-    text(c, '& good company', iso(0, 1.9, 84), 7, const Color(0xFFE8DDC1));
-    box(
-      c,
-      1,
-      .4,
-      5.8,
-      .7,
-      35,
-      const Color(0xFFCCAA82),
-      const Color(0xFF996D4B),
-      const Color(0xFF7D583E),
-      13,
-    );
-    for (var x = 1.0; x < 6.5; x += 1.1) {
-      line(c, iso(x, 1.1, 16), iso(x, 1.1, 45), const Color(0xFFBC926B), 1);
-    }
-    box(
-      c,
-      1.3,
-      .45,
-      1.15,
-      .55,
-      26,
-      const Color(0xFF66817A),
-      const Color(0xFF3E5F57),
-      const Color(0xFF294A43),
-      48,
-    );
-    box(
-      c,
-      1.42,
-      .91,
-      .8,
-      .1,
-      12,
-      const Color(0xFFD4DBD4),
-      const Color(0xFFABB8AC),
-      const Color(0xFF94A79C),
-      54,
-    );
-    for (final x in [1.6, 1.95]) {
-      c.drawCircle(
-        iso(x, 1.04, 65),
-        3,
-        Paint()..color = const Color(0xFFE4CE9C),
-      );
-    }
-    if (s.machines.contains('tea')) {
-      box(
-        c,
-        3,
-        .52,
-        .5,
-        .4,
-        23,
-        const Color(0xFFD9BA77),
-        const Color(0xFFCCAA62),
-        const Color(0xFFB89346),
-        48,
-      );
-    }
-    if (s.machines.contains('milk')) {
-      box(
-        c,
-        4,
-        .52,
-        .4,
-        .4,
-        20,
-        const Color(0xFFD9E2DB),
-        const Color(0xFFA6B7AF),
-        const Color(0xFF809D8E),
-        48,
-      );
-    }
-    if (s.machines.contains('oven')) {
-      box(
-        c,
-        5,
-        .47,
-        .9,
-        .5,
-        25,
-        const Color(0xFF646F6A),
-        const Color(0xFF333F38),
-        const Color(0xFF505E55),
-        48,
-      );
-    }
-    for (var i = 0; i < 3; i++) {
-      c.drawOval(
-        Rect.fromCenter(center: iso(3.5 + i * .3, .8, 50), width: 8, height: 5),
-        Paint()..color = const Color(0xFFFFFBF0),
-      );
-    }
-    _person(c, 3.6, 1.45, const Color(0xFFD18C73), true);
-    if (s.staff) _person(c, 5.9, 1.6, const Color(0xFF6988A3), true);
-    final items = s.decor.indexed.toList()
-      ..sort((a, b) => (a.$2.x + a.$2.y).compareTo(b.$2.x + b.$2.y));
-    var customer = 0;
-    for (final item in items) {
-      final d = item.$2, x = d.x + .15, y = d.y + .15;
-      if (selected == item.$1) {
-        poly(c, [
-          iso(d.x, d.y, 14),
-          iso(d.x + 1, d.y, 14),
-          iso(d.x + 1, d.y + 1, 14),
-          iso(d.x, d.y + 1, 14),
-        ], const Color(0xFFEDD18B));
-      }
+      iso(0, 3.4, 70),
+      iso(0, 3.4, 116),
+      iso(0, 1, 116),
+    ], const Color(0xFF385449));
+    text(c, 'MY CLOUD', iso(0, 2.2, 102), 11, const Color(0xFFFFF0CA));
+    text(c, 'CAFÉ', iso(0, 2.2, 86), 15, const Color(0xFFFFF0CA));
+    box(c, 1, 0, 6, .85, 33, wood);
+    text(c, 'MASUK / KELUAR', iso(7.5, 5.6, 14), 8, green);
+    final items = s.decor.toList()
+      ..sort((a, b) => (a.x + a.y).compareTo(b.x + b.y));
+    for (final d in items) {
+      final x = d.x + .12, y = d.y + .12;
       switch (d.kind) {
         case 'table':
-          box(c, x + .25, y + .3, .12, .12, 22, edge, edge, edge, 13);
-          box(c, x, y, .85, .75, 7, wood, const Color(0xFF9B6B49), edge, 35);
+        case 'counter':
+          box(c, x + .35, y + .35, .15, .15, 28, const Color(0xFF805F42));
           box(
             c,
-            x + .15,
-            y + .85,
-            .45,
-            .35,
-            17,
-            const Color(0xFF6C8C76),
-            const Color(0xFF496D56),
-            const Color(0xFF3C5E49),
-            13,
+            x,
+            y,
+            .84,
+            .84,
+            7,
+            d.kind == 'counter' ? const Color(0xFF7D9B8D) : wood,
+            41,
           );
-          box(
-            c,
-            x + .15,
-            y + 1.12,
-            .45,
-            .1,
-            18,
-            const Color(0xFF6C8C76),
-            const Color(0xFF496D56),
-            const Color(0xFF3C5E49),
-            25,
-          );
-          if (customer < s.orders.length) {
-            _person(
-              c,
-              x + 1,
-              y + .2,
-              [
-                const Color(0xFFE1AA58),
-                const Color(0xFF8A9CB4),
-                const Color(0xFFC47F7B),
-              ][customer % 3],
-              false,
-            );
-            c.drawOval(
-              Rect.fromCenter(
-                center: iso(x + .4, y + .35, 44),
-                width: 12,
-                height: 7,
-              ),
-              Paint()..color = const Color(0xFFF9F4E8),
-            );
-            c.drawCircle(
-              iso(x + .4, y + .35, 46),
-              3,
-              Paint()..color = const Color(0xFF7E583D),
-            );
-            customer++;
-          }
+        case 'chair':
+          box(c, x + .1, y + .1, .56, .56, 18, green);
+          box(c, x + .1, y + .62, .56, .1, 22, green, 29);
         case 'plant':
-          box(
-            c,
-            x + .2,
-            y + .2,
-            .45,
-            .45,
-            17,
-            const Color(0xFFD8B290),
-            const Color(0xFFB7805C),
-            const Color(0xFFA46C4B),
-            13,
-          );
-          final p = iso(x + .4, y + .4, 36);
+          box(c, x + .2, y + .2, .45, .45, 18, const Color(0xFFCF9B73));
+          final p = iso(x + .4, y + .4, 43);
           for (var i = 0; i < 7; i++) {
             final a = i * math.pi * 2 / 7;
             c.drawOval(
               Rect.fromCenter(
-                center: p + Offset(math.cos(a) * 11, math.sin(a) * 10 - 9),
-                width: 17,
-                height: 9,
+                center: p + Offset(math.cos(a) * 11, math.sin(a) * 10),
+                width: 18,
+                height: 11,
               ),
-              Paint()
-                ..color = i.isEven
-                    ? const Color(0xFF507D55)
-                    : const Color(0xFF729662),
+              Paint()..color = i.isEven ? green : const Color(0xFF7BA16B),
             );
           }
         case 'lamp':
           final p = iso(x + .4, y + .4, 14);
           c.drawOval(
-            Rect.fromCenter(center: p, width: 23, height: 12),
-            Paint()..color = edge,
+            Rect.fromCenter(center: p, width: 24, height: 12),
+            Paint()..color = wood,
           );
-          line(c, p, p - const Offset(0, 62), edge, 3);
+          line(c, p, p - const Offset(0, 68), wood, 3);
           poly(c, [
-            p + const Offset(-17, -55),
-            p + const Offset(17, -55),
-            p + const Offset(10, -75),
-            p + const Offset(-10, -75),
-          ], const Color(0xFFF0D39E));
+            p + const Offset(-18, -54),
+            p + const Offset(18, -54),
+            p + const Offset(10, -77),
+            p + const Offset(-10, -77),
+          ], const Color(0xFFF6DA9D));
         case 'shelf':
-          box(c, x, y, .8, .35, 52, wood, edge, const Color(0xFF75543D), 13);
+          box(c, x, y, .8, .4, 54, wood);
           for (var i = 0; i < 5; i++) {
             box(
               c,
               x + i * .14,
-              y + .34,
+              y + .38,
               .1,
-              .12,
-              22,
-              [wall, const Color(0xFFDEA17E), const Color(0xFFE1CB95)][i % 3],
-              const Color(0xFFCEA77A),
-              wall,
-              21,
+              .13,
+              24,
+              [wall, green, const Color(0xFFDCAC79)][i % 3],
+              23,
             );
           }
       }
     }
+    for (final e in s.toolPositions.entries) {
+      final d = e.value, x = d.x + .18, y = d.y + .18;
+      final color = switch (e.key) {
+        'coffee' => green,
+        'milk' => const Color(0xFFCAD7D4),
+        'tea' => const Color(0xFFDDBB72),
+        'chocolate' => const Color(0xFF9B6B52),
+        _ => const Color(0xFF78858C),
+      };
+      box(c, x, y, .65, .55, 23, color, 48);
+      box(c, x + .08, y + .49, .48, .07, 10, const Color(0xFFD7DFD6), 50);
+      text(
+        c,
+        switch (e.key) {
+          'coffee' => 'ESP',
+          'milk' => 'MILK',
+          'tea' => 'TEA',
+          'oven' => 'OVEN',
+          'freezer' => 'ICE',
+          _ => 'CHOCO',
+        },
+        iso(x + .3, y + .55, 68),
+        7,
+        const Color(0xFF263F36),
+      );
+    }
     c.restore();
   }
 
-  void _person(Canvas c, double x, double y, Color shirt, bool apron) {
-    final p = iso(x, y, 13);
+  @override
+  bool shouldRepaint(covariant RoomPainter old) =>
+      fingerprint != old.fingerprint;
+}
+
+class PeoplePainter extends CustomPainter {
+  final CafeState s;
+  final GameEngine? engine;
+  final Stopwatch watch;
+  final int Function() clock;
+  final int? selected;
+  final Offset? preview;
+  final Map<int, List<Offset>> routes;
+  PeoplePainter(
+    this.s,
+    this.engine,
+    Listenable frames,
+    this.watch,
+    this.clock,
+    this.selected,
+    this.preview,
+  ) : routes = {
+        for (final o in [
+          ...s.orders,
+          ...?(engine?.departures.map((d) => d.order)),
+        ])
+          o.id: cafeRoute(s, Offset(o.seatX + .5, o.seatY + .5)),
+      },
+      super(repaint: frames);
+  static const shirts = [
+    Color(0xFFD39264),
+    Color(0xFF7899AF),
+    Color(0xFFB87E8D),
+    Color(0xFF9AA66B),
+    Color(0xFF9B87B1),
+    Color(0xFF6DA49E),
+  ];
+  static void person(
+    Canvas c,
+    Offset p,
+    int look,
+    double phase, {
+    bool walking = false,
+    bool staff = false,
+  }) {
+    final skin = [
+          const Color(0xFFEBC39F),
+          const Color(0xFFBD8C64),
+          const Color(0xFF8F6249),
+        ][look % 3],
+        hair = [
+          const Color(0xFF4B3930),
+          const Color(0xFF795439),
+          const Color(0xFF292F32),
+        ][(look ~/ 3) % 3];
     c.drawOval(
-      Rect.fromCenter(center: p + const Offset(0, 2), width: 21, height: 9),
-      Paint()..color = Colors.black.withValues(alpha: .12),
+      Rect.fromCenter(center: p + const Offset(0, 2), width: 23, height: 10),
+      Paint()..color = const Color(0x1F243D30),
     );
-    line(
+    final stride = walking ? math.sin(phase) * 5 : 0.0,
+        bob = walking
+            ? math.sin(phase * 2).abs() * 2
+            : math.sin(phase * .3) * .7;
+    p = p - Offset(0, bob);
+    RoomPainter.line(
       c,
-      p + const Offset(-4, 0),
-      p + const Offset(-4, -16),
-      const Color(0xFF444E49),
-      4,
+      p + Offset(-5, stride),
+      p + const Offset(-4, -15),
+      const Color(0xFF42504A),
+      5,
     );
-    line(
+    RoomPainter.line(
       c,
-      p + const Offset(4, 0),
-      p + const Offset(4, -16),
-      const Color(0xFF444E49),
-      4,
+      p + Offset(5, -stride),
+      p + const Offset(4, -15),
+      const Color(0xFF42504A),
+      5,
     );
     c.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromCenter(center: p - const Offset(0, 24), width: 22, height: 26),
-        const Radius.circular(6),
+        Rect.fromCenter(center: p - const Offset(0, 25), width: 24, height: 27),
+        const Radius.circular(7),
       ),
-      Paint()..color = shirt,
+      Paint()..color = shirts[look % shirts.length],
     );
-    if (apron) {
-      c.drawRect(
-        Rect.fromCenter(center: p - const Offset(0, 23), width: 13, height: 20),
-        Paint()..color = const Color(0xFF38594F),
+    if (staff) {
+      c.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+            center: p - const Offset(0, 24),
+            width: 15,
+            height: 21,
+          ),
+          const Radius.circular(3),
+        ),
+        Paint()..color = const Color(0xFF315B4B),
       );
     }
-    c.drawCircle(
-      p - const Offset(0, 44),
-      10,
-      Paint()..color = const Color(0xFF513E33),
+    RoomPainter.line(
+      c,
+      p + Offset(-13, -31),
+      p + Offset(-15, -17 - stride),
+      skin,
+      4,
     );
-    c.drawCircle(
-      p - const Offset(0, 41),
-      8,
-      Paint()..color = const Color(0xFFE4B390),
+    RoomPainter.line(
+      c,
+      p + Offset(13, -31),
+      p + Offset(15, -17 + stride),
+      skin,
+      4,
     );
+    c.drawCircle(p - const Offset(0, 46), 11, Paint()..color = hair);
+    c.drawCircle(p - const Offset(0, 43), 9, Paint()..color = skin);
     c.drawArc(
-      Rect.fromCircle(center: p - const Offset(0, 44), radius: 10),
+      Rect.fromCircle(center: p - const Offset(0, 47), radius: 11),
       math.pi,
       math.pi,
       true,
-      Paint()..color = const Color(0xFF513E33),
+      Paint()..color = hair,
     );
+    if (look.isEven) {
+      c.drawCircle(p + const Offset(-8, -49), 5, Paint()..color = hair);
+    }
+    for (final x in [-3.0, 3.0]) {
+      c.drawCircle(
+        p + Offset(x, -43),
+        1,
+        Paint()..color = const Color(0xFF3B3932),
+      );
+    }
+    if (look % 4 == 0) {
+      for (final x in [-4.0, 4.0]) {
+        c.drawCircle(
+          p + Offset(x, -43),
+          4,
+          Paint()
+            ..color = hair
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1,
+        );
+      }
+    }
   }
 
   @override
-  bool shouldRepaint(covariant _CafePainter oldDelegate) =>
-      oldDelegate.fingerprint != fingerprint;
+  void paint(Canvas c, Size size) {
+    c.save();
+    RoomPainter.setup(c, size);
+    final now = clock(), phase = watch.elapsedMilliseconds / 110;
+    for (final w in s.workers.indexed) {
+      final home = Offset(3 + w.$1 * 1.3, 1.5),
+          motion = engine?.staffMotions[w.$2.name];
+      final elapsed = motion == null
+          ? 1.0
+          : ((now - motion.$3) / GameEngine.walkMillis).clamp(0.0, 1.0);
+      final position = motion == null
+          ? home
+          : Offset.lerp(
+              home,
+              Offset(motion.$1, motion.$2),
+              1 - (elapsed * 2 - 1).abs(),
+            )!;
+      person(
+        c,
+        iso(position.dx, position.dy, 13),
+        w.$1 + 1,
+        phase,
+        staff: true,
+        walking: elapsed < 1,
+      );
+      RoomPainter.text(
+        c,
+        w.$2.name,
+        iso(position.dx, position.dy, 78),
+        9,
+        const Color(0xFF315B4B),
+      );
+    }
+    final all = [
+      ...s.orders.map((o) => (o, false, o.arrivedAt)),
+      ...?(engine?.departures.map((d) => (d.order, true, d.leftAt))),
+    ];
+    all.sort(
+      (a, b) => (a.$1.seatX + a.$1.seatY).compareTo(b.$1.seatX + b.$1.seatY),
+    );
+    for (final item in all) {
+      final o = item.$1,
+          t = ((now - item.$3) / GameEngine.walkMillis).clamp(0.0, 1.0),
+          route = routes[o.id]!,
+          progress = item.$2 ? 1 - t : t,
+          scaled = progress * (route.length - 1);
+      final i = scaled.floor().clamp(0, route.length - 2),
+          position = Offset.lerp(
+            route[i],
+            route[i + 1],
+            (scaled - i).clamp(0, 1),
+          )!;
+      final p = iso(position.dx, position.dy, 13),
+          customer = s.customers.where((v) => v.id == o.customerId).firstOrNull;
+      person(c, p, customer?.look ?? o.id, phase, walking: t < 1);
+      if (!item.$2 && t >= 1) {
+        final b = engine?.brewFor(o.id),
+            ready =
+                b != null && b.readyAt <= now && engine?.nextStep(o.id) == null;
+        c.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(
+              center: p - const Offset(0, 84),
+              width: 94,
+              height: 34,
+            ),
+            const Radius.circular(10),
+          ),
+          Paint()
+            ..color = o.id == selected
+                ? const Color(0xFFFFE1A0)
+                : const Color(0xFFFFFDF5),
+        );
+        RoomPainter.text(
+          c,
+          o.name,
+          p - const Offset(0, 90),
+          10,
+          const Color(0xFF315B4B),
+        );
+        RoomPainter.text(
+          c,
+          ready ? 'Siap • Sajikan' : recipeById(o.recipe).name,
+          p - const Offset(0, 77),
+          8,
+          const Color(0xFF526E5B),
+        );
+        if (b != null && b.readyAt > now) {
+          final v = ((now - b.startedAt) / (b.readyAt - b.startedAt)).clamp(
+            0.0,
+            1.0,
+          );
+          c.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(p.dx - 34, p.dy - 65, 68 * v, 3),
+              const Radius.circular(2),
+            ),
+            Paint()..color = const Color(0xFF5A8D69),
+          );
+        }
+      }
+    }
+    for (final b in s.brews.where((b) => b.readyAt > now)) {
+      final o = s.orders.where((o) => o.id == b.orderId).firstOrNull;
+      if (o == null) continue;
+      final tool = recipeById(o.recipe).steps[b.step].tool,
+          p = s.toolPositions[tool];
+      if (p == null) continue;
+      for (var i = 0; i < 3; i++) {
+        final t = ((watch.elapsedMilliseconds / 1100) + i / 3) % 1,
+            pos =
+                iso(p.x + .5, p.y + .5, 83) +
+                Offset(math.sin(t * 5 + i) * 4, -t * 21);
+        c.drawCircle(
+          pos,
+          2 + t * 2,
+          Paint()..color = Colors.white.withValues(alpha: (1 - t) * .7),
+        );
+      }
+    }
+    if (preview != null) {
+      final p = preview!;
+      RoomPainter.poly(c, [
+        iso(p.dx, p.dy, 15),
+        iso(p.dx + 1, p.dy, 15),
+        iso(p.dx + 1, p.dy + 1, 15),
+        iso(p.dx, p.dy + 1, 15),
+      ], const Color(0x99E6BC67));
+    }
+    c.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant PeoplePainter old) => true;
+}
+
+List<Offset> cafeRoute(CafeState s, Offset destination) {
+  const entrance = (7, 5);
+  final target = (destination.dx.floor(), destination.dy.floor());
+  final blocked = s.decor
+      .where((d) => !(d.x == target.$1 && d.y == target.$2))
+      .map((d) => (d.x, d.y))
+      .toSet();
+  final queue = [entrance], parents = <(int, int), (int, int)?>{entrance: null};
+  for (var i = 0; i < queue.length; i++) {
+    final p = queue[i];
+    if (p == target) break;
+    for (final d in [(0, -1), (-1, 0), (1, 0), (0, 1)]) {
+      final n = (p.$1 + d.$1, p.$2 + d.$2);
+      if (n.$1 < 0 ||
+          n.$1 > 7 ||
+          n.$2 < 1 ||
+          n.$2 > 5 ||
+          blocked.contains(n) ||
+          parents.containsKey(n)) {
+        continue;
+      }
+      parents[n] = p;
+      queue.add(n);
+    }
+  }
+  if (!parents.containsKey(target)) {
+    return [const Offset(7.5, 5.5), destination];
+  }
+  final result = <Offset>[];
+  (int, int)? at = target;
+  while (at != null) {
+    result.add(Offset(at.$1 + .5, at.$2 + .5));
+    at = parents[at];
+  }
+  return result.length > 1
+      ? result.reversed.toList()
+      : [const Offset(8, 6), destination];
 }

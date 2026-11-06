@@ -29,9 +29,9 @@ Omit both Supabase variables for a guest-only build. These are **public client c
 - Team: `norfabagas`
 - Site ID: `c7588442-6a71-4e91-a66d-931e27818b3b`
 - Dashboard: https://app.netlify.com/projects/my-cloud-cafe
-- Intended production origin: https://my-cloud-cafe.netlify.app
+- Production origin: https://my-cloud-cafe.netlify.app
 
-The project was created through the connected Netlify account. Its creation alone does **not** publish a playable build.
+The project is published through an authenticated manual CLI deployment. `.netlify/` is ignored and contains the local project link.
 
 For continuous deployment, connect `norfabagas/my-cloud-cafe`, use branch `main`, and keep the root `netlify.toml` build settings. The public `SUPABASE_URL` and `SUPABASE_ANON_KEY` variables are already configured on this Netlify project. Leave secret scanning enabled; these two values are public, so only exempt the precise public variable if a scanner produces a false positive.
 
@@ -42,3 +42,9 @@ netlify deploy --prod --dir=build/web --site=c7588442-6a71-4e91-a66d-931e27818b3
 ```
 
 The GitHub workflow runs analysis and tests and uploads the same web artifact. It does not pretend to deploy when no Netlify credential or Git connection has been configured.
+
+## Customer registry migration
+
+Apply `20261106123041_cafe_customer_registry.sql` before publishing the simulation update. It adds only `mcc_customers`, its owner-scoped policies, and a SECURITY INVOKER trigger on accepted `mcc_cafe_saves` writes. The migration has been applied to the configured project, and `supabase/verify_customer_registry.sql` passed with all test writes rolled back. Guest customers remain local; signed-in customer registration follows periodic cloud sync, including retries after an outage.
+
+Existing saves migrate their embedded chairs, customer identities, tools and pending recipes when loaded by the updated client. Close all existing café tabs and reopen the site to activate a waiting offline update.

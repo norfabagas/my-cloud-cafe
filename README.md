@@ -4,11 +4,15 @@ A Flutter café management game for browsers and mobile, with local saves and op
 
 ## Play
 
-Prepare a customer's order, wait for brewing, then serve it to earn coins and XP. Spend earned coins on equipment, recipes and furniture. Recruit Ayu to automate service and generate capped earnings while away. Talk to customers and claim one-time café milestones.
+Customers walk into the café, take a seat, order, and leave after service or when their patience runs out. Select a customer, tap each required tool in sequence, wait for its ingredient, then serve. A latte needs espresso followed by milk. Recipes take 5–12 seconds of active preparation, all below 30 seconds.
 
-- 8 recipes, 5 equipment types, 4 furniture types and 3 room palettes.
+- 8 manageable recipes, 6 equipment types, 6 furniture types and 3 room palettes.
 - Isometric café drawn in Flutter; no original game's artwork, audio or code is bundled.
-- Responsive desktop navigation and mobile bottom navigation.
+- The café is the only activity screen. Menu, shop, staff, customer book, stories, and accounts open in-game popups.
+- Frame-driven walking and brewing effects, independent of simulation ticks and saves. Pinch to zoom and pan without rotating the camera.
+- Hold and drag furniture or tools in layout mode; coordinate dialogs are also available. Tools require a free bar slot or table. Chairs must adjoin tables, and paths to chairs stay open.
+- Up to 3 staff with barista, server, or combined duties. Staff use the same recipe steps and shared tools as the player; rest restores their energy.
+- 24 named recurring customers with persistent appearances and visit counts. New identities save locally immediately and register in the owner-scoped database on account sync.
 - Local autosave, previous-save recovery and copy/paste backups.
 - Optional email/password accounts with per-user saves, optimistic cloud revisions and explicit conflict resolution.
 - Offline web reload after the first complete installation; all rendering assets and fonts are served locally.

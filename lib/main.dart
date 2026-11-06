@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -10,6 +11,7 @@ import 'ui/game_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   final preferences = await SharedPreferences.getInstance();
   final store = SaveStore(preferences);
   final engine = GameEngine(store.load(DateTime.now().millisecondsSinceEpoch));
