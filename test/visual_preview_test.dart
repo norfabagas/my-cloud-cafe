@@ -55,7 +55,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(tester.takeException(), isNull);
     await tester.runAsync(() async {
       final image =

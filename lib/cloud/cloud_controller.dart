@@ -12,14 +12,18 @@ class CloudController extends ChangeNotifier {
   final SupabaseClient? client;
   final SaveStore store;
   final GameEngine engine;
+  final String? authRedirectTo;
   final CloudService? _service;
   StreamSubscription<AuthState>? _authSubscription;
-  Timer? _retry;
+  Timer? _retry, _expiry;
   Future<void> _accountQueue = Future.value();
   String? _requestedId, _userId, _email;
   bool _requested = false, _disposed = false;
   bool _authBusy = false, _syncBusy = false, _switchBusy = false;
   bool _newAccount = false;
+  bool _initialized = false;
+  bool _accountReady = false;
+  bool _accountFailed = false;
   int _epoch = 0;
   CloudSnapshot? _conflicting;
   String _status = 'Progres tersimpan di perangkat ini.';
@@ -28,10 +32,32 @@ class CloudController extends ChangeNotifier {
     this.client,
     required this.store,
     required this.engine,
+    this.authRedirectTo,
     CloudService? service,
   }) : _service = service ?? (client == null ? null : CloudService(client));
 
   bool get configured => client != null;
+  bool get initialized => _initialized;
+  bool get authenticating => _authBusy;
+  String? get userId => _userId;
+  bool get _hasSession {
+    final session = client?.auth.currentSession;
+    return session != null &&
+        !session.user.isAnonymous &&
+        session.expiresAt != null &&
+        session.expiresAt! * 1000 > DateTime.now().millisecondsSinceEpoch;
+  }
+
+  bool get signedIn =>
+      _initialized &&
+      !_authBusy &&
+      !_switchBusy &&
+      _accountReady &&
+      _hasSession &&
+      _userId != null &&
+      _userId == _requestedId &&
+      _userId == client?.auth.currentSession?.user.id &&
+      store.ownerId == _userId;
   bool get busy => _authBusy || _syncBusy || _switchBusy;
   String? get userEmail => _email;
   String get status => _status;
@@ -47,7 +73,13 @@ class CloudController extends ChangeNotifier {
       !_disposed && epoch == _epoch && uid == _userId;
 
   Future<void> initialize() async {
-    if (client == null || _retry != null) return;
+    if (_initialized) return;
+    if (client == null) {
+      _initialized = true;
+      _status = 'Layanan login belum tersedia. Muat ulang dan coba kembali.';
+      _notify();
+      return;
+    }
     _authSubscription = client!.auth.onAuthStateChange.listen(
       (event) {
         unawaited(_scheduleAccount(event.session?.user));
@@ -59,18 +91,49 @@ class CloudController extends ChangeNotifier {
     );
     await _scheduleAccount(client!.auth.currentUser);
     if (_disposed) return;
+    _initialized = true;
+    _armExpiry();
+    _notify();
     _retry = Timer.periodic(const Duration(seconds: 30), (_) {
       unawaited(sync());
     });
   }
 
+  void _armExpiry() {
+    _expiry?.cancel();
+    final expiresAt = client?.auth.currentSession?.expiresAt;
+    if (expiresAt == null) return;
+    final remaining = expiresAt * 1000 - DateTime.now().millisecondsSinceEpoch;
+    if (remaining <= 0) {
+      _status = 'Sesi berakhir. Masuk kembali untuk melanjutkan.';
+      return;
+    }
+    _expiry = Timer(Duration(milliseconds: remaining), () {
+      if (_disposed) return;
+      if (!_hasSession) {
+        _status = 'Sesi berakhir. Masuk kembali untuk melanjutkan.';
+      }
+      _notify();
+    });
+  }
+
+  void recheckSession() {
+    _armExpiry();
+    _notify();
+  }
+
   Future<void> _scheduleAccount(User? user) {
     if (_disposed) return Future.value();
-    if (_requested && _requestedId == user?.id) {
+    if (user?.isAnonymous == true) user = null;
+    _armExpiry();
+    if (_requested && _requestedId == user?.id && !_accountFailed) {
       _email = user?.email;
+      _notify();
       return _accountQueue;
     }
     _requested = true;
+    _accountReady = false;
+    _accountFailed = false;
     _requestedId = user?.id;
     final epoch = ++_epoch;
     _accountQueue = _accountQueue.catchError((_) {}).then((_) async {
@@ -78,7 +141,9 @@ class CloudController extends ChangeNotifier {
       _switchBusy = true;
       _notify();
       try {
-        if (store.ownerId == _userId) await store.save(engine.state);
+        if (_userId != null && store.ownerId == _userId) {
+          await store.save(engine.state);
+        }
         if (_disposed || epoch != _epoch) return;
         await store.switchAccount(user?.id);
         if (_disposed || epoch != _epoch) return;
@@ -87,18 +152,22 @@ class CloudController extends ChangeNotifier {
         _conflicting = null;
         _newAccount = !store.hasSave;
         engine.state = store.load(engine.now);
-        engine.resume();
-        await store.save(engine.state);
+        if (_userId != null && _hasSession) {
+          engine.resume();
+          await store.save(engine.state);
+        }
+        _accountReady = _userId != null;
         _status = _userId == null
-            ? 'Mode tamu. Progres tersimpan di perangkat ini.'
+            ? 'Masuk dengan akunmu untuk membuka kafe.'
             : 'Progres lokal siap. Memeriksa cadangan cloud…';
       } catch (_) {
+        _accountFailed = true;
         _status = 'Progres lokal belum dapat dimuat. Coba masuk kembali.';
       } finally {
         if (!_disposed && epoch == _epoch) {
           _switchBusy = false;
           _notify();
-          if (_userId != null) unawaited(sync());
+          if (_userId != null && _hasSession) unawaited(sync());
         }
       }
     });
@@ -113,23 +182,13 @@ class CloudController extends ChangeNotifier {
     }
   }
 
-  Future<void> signIn(String email, String password) => _authenticate(() async {
-    await client!.auth
-        .signInWithPassword(email: email.trim(), password: password)
-        .timeout(const Duration(seconds: 15));
-    await _scheduleAccount(client!.auth.currentUser);
-  });
-
-  Future<void> signUp(String email, String password) => _authenticate(() async {
-    final result = await client!.auth
-        .signUp(email: email.trim(), password: password)
-        .timeout(const Duration(seconds: 15));
-    if (result.session == null) {
-      _status =
-          'Periksa email untuk konfirmasi akun, lalu kembali ke sini dan masuk.';
-    } else {
-      await _scheduleAccount(result.user);
-    }
+  Future<void> signInWithGoogle() => _authenticate(() async {
+    final launched = await client!.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: authRedirectTo,
+    );
+    if (!launched) throw StateError('OAuth browser did not open.');
+    _status = 'Selesaikan login Google untuk membuka kafe.';
   });
 
   Future<void> _authenticate(Future<void> Function() operation) async {
@@ -139,11 +198,9 @@ class CloudController extends ChangeNotifier {
     try {
       await operation();
     } on AuthException catch (error) {
-      _status = error.code == 'email_not_confirmed'
-          ? 'Konfirmasi email dahulu, lalu masuk kembali.'
-          : error.code == 'over_email_send_rate_limit'
-          ? 'Pengiriman email dibatasi. Tunggu sebentar sebelum mencoba lagi.'
-          : 'Akun belum dapat diproses. Periksa email dan kata sandi.';
+      _status = error.code == 'access_denied'
+          ? 'Login Google dibatalkan. Silakan coba lagi.'
+          : 'Login Google belum berhasil. Silakan coba lagi.';
     } catch (_) {
       _status = 'Akun belum terhubung. Periksa koneksi lalu coba lagi.';
     } finally {
@@ -153,8 +210,9 @@ class CloudController extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    if (client == null || busy) return;
+    if (client == null || _authBusy || _switchBusy) return;
     _authBusy = true;
+    _status = 'Keluar dari akun…';
     _notify();
     try {
       await store.save(engine.state);
@@ -179,12 +237,18 @@ class CloudController extends ChangeNotifier {
       s.machines.length > 1 ||
       s.stories.isNotEmpty ||
       s.claimedGoals.isNotEmpty ||
-      s.decor.length != 3 ||
+      s.decor.length != 5 ||
+      s.decor.map((d) => '${d.kind}:${d.x}:${d.y}').join(';') !=
+          CafeState(0).decor.map((d) => '${d.kind}:${d.x}:${d.y}').join(';') ||
+      s.toolPositions['coffee']?.x != 1 ||
+      s.toolPositions['coffee']?.y != 0 ||
+      s.disabledMenu.isNotEmpty ||
       s.theme != 'sage';
 
   Future<void> sync() async {
     final uid = _userId;
     if (_service == null ||
+        !_hasSession ||
         uid == null ||
         _syncBusy ||
         _switchBusy ||
@@ -335,6 +399,7 @@ class CloudController extends ChangeNotifier {
     _disposed = true;
     _epoch++;
     _retry?.cancel();
+    _expiry?.cancel();
     unawaited(_authSubscription?.cancel());
     super.dispose();
   }

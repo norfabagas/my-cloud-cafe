@@ -22,6 +22,10 @@ jobs:
       - run: flutter pub get --enforce-lockfile
       - run: flutter analyze
       - run: flutter test
+      - name: Verify customer registry and account isolation
+        run: |
+          npm install --prefix "$RUNNER_TEMP/cafe-qa" --no-save --package-lock=false @electric-sql/pglite@0.5.15
+          PGLITE_MODULE="$RUNNER_TEMP/cafe-qa/node_modules/@electric-sql/pglite" node tools/qa/customer_registry.cjs
       - name: Build offline web release
         run: bash tools/build_web.sh
         env:
