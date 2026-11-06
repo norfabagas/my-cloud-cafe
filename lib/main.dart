@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cloud/cloud_controller.dart';
 import 'cloud/account_panel.dart';
+import 'cloud/auth_gate.dart';
 import 'game/engine.dart';
 import 'persistence/save_store.dart';
 import 'ui/game_shell.dart';
@@ -23,18 +25,16 @@ Future<void> main() async {
       await Supabase.initialize(url: url, anonKey: key);
       client = Supabase.instance.client;
     } catch (_) {
-      // A failed optional cloud connection must never prevent local play.
+      // The auth gate stays closed if initialization is unavailable.
     }
   }
-  final cloud = CloudController(client: client, store: store, engine: engine);
+  final cloud = CloudController(
+    client: client,
+    store: store,
+    engine: engine,
+    authRedirectTo: kIsWeb ? Uri.base.origin : null,
+  );
   await cloud.initialize();
-  engine.resume();
-  try {
-    await store.save(engine.state);
-  } catch (_) {
-    store.warning =
-        'Progres belum tersimpan. Salin cadangan melalui Akun & data.';
-  }
   runApp(CafeApp(engine: engine, store: store, cloud: cloud));
 }
 
@@ -103,11 +103,14 @@ class CafeApp extends StatelessWidget {
         ),
       ),
     ),
-    home: GameShell(
-      engine: engine,
-      store: store,
-      accountPanel: AccountPanel(controller: cloud),
-      onSaved: cloud.markDirty,
+    home: AuthGate(
+      controller: cloud,
+      gameBuilder: (_) => GameShell(
+        engine: engine,
+        store: store,
+        accountPanel: AccountPanel(controller: cloud),
+        onSaved: cloud.markDirty,
+      ),
     ),
   );
 }

@@ -41,6 +41,7 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    game.resume();
     _start();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.store.warning != null) _toast(widget.store.warning!);
@@ -134,6 +135,7 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
   Future<void> _popup(String title, Widget Function() content) async {
     await showDialog<void>(
       context: context,
+      useRootNavigator: false,
       builder: (dialogContext) => Dialog(
         insetPadding: const EdgeInsets.all(16),
         clipBehavior: Clip.antiAlias,
@@ -774,6 +776,7 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
     var x = initialX, y = initialY;
     await showDialog<void>(
       context: context,
+      useRootNavigator: false,
       builder: (c) => StatefulBuilder(
         builder: (c, update) => AlertDialog(
           title: Text(title),
@@ -914,7 +917,7 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       const Text(
-        'Pelanggan baru dicatat otomatis. Identitas dan penampilan tetap sama saat kembali. Mode tamu menyimpan di perangkat; akun tersinkron mencatatnya ke database.',
+        'Pelanggan baru dicatat otomatis. Identitas dan penampilan tetap sama saat kembali. Data tersimpan di perangkat dan disinkronkan ke akunmu.',
         style: TextStyle(fontSize: 12, color: muted, height: 1.6),
       ),
       const SizedBox(height: 12),
@@ -1033,6 +1036,7 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
     String? error;
     await showDialog<void>(
       context: context,
+      useRootNavigator: false,
       builder: (c) => StatefulBuilder(
         builder: (c, update) => AlertDialog(
           title: const Text('Pulihkan cadangan'),

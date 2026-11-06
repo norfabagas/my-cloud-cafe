@@ -4,7 +4,7 @@
 
 - Flutter 3.47.7 / Dart 3.13.5 release web build.
 - `flutter analyze`: no issues.
-- 30 Flutter tests covering economy rewards, ingredient sequencing, tool contention, staff roles/rest and manual handoff, menu availability, visitor identity, legacy saves, table-supported tools, recovery, account isolation, HTTP identity binding, cloud conflicts, pinch zoom without rotation, dragging after zoom, paths and popup layouts.
+- 37 Flutter tests covering economy rewards, ingredient sequencing, tool contention, staff roles/rest and manual handoff, menu availability, visitor identity, legacy saves, table-supported tools, recovery, account isolation, HTTP identity binding, cloud conflicts, pinch zoom without rotation, dragging after zoom, paths and popup layouts. Auth cases include Google OAuth URL/launch handling, denied play before a session, failed launch, anonymous/expired sessions, restored account caches, token renewal, logout popup removal, missing configuration and phone/desktop login layouts.
 - Responsive views at 360, 768, 1024 and 1440 pixels, including a 600-pixel-tall desktop viewport.
 - Offline bundle generated with CanvasKit runtime and local fonts. Alternate renderers and debug symbols excluded.
 - REA 6.8.0 static analysis with OpenJDK 21 and headless JADX 0.7.1: `static_inventory_complete` across all 24,763 Dalvik classes in `evidence/my-cafe-001/`.
@@ -37,7 +37,15 @@ The `prefix_mcc_tables` migration renamed the existing game table to `mcc_cafe_s
 
 The client captures and explicitly binds each HTTP request's bearer token to its initiating account. A real SDK request against a local HTTP dependency proved that switching the active account during a write does not change the request identity. A second local HTTP scenario exercised unavailable reads, pending local saves, successful retries and explicit conflict resolution. These transport tests use controlled responses from the implemented RPC contract; they do not validate email delivery or a real user's login credentials.
 
-No test signup email was sent. Existing shared-project Auth settings were preserved. Signup asks the player to confirm email and then return to the game to log in.
+No test signup email was sent. Existing shared-project Auth settings were preserved; the login-required update uses its active Google provider.
+
+## Mandatory Google login
+
+The public Auth settings endpoint confirms Google enabled and email/password disabled on the existing `dhkgygjsuamelcfnwvlg` project; aggregate identities also use Google. The application reuses that provider and does not offer an inactive password form. It mounts the café only for a non-anonymous, unexpired session with the matching account cache, and disposes the account Navigator and its dialogs on logout/expiry. Legacy guest saves are retained but cannot open the game.
+
+The release browser Auth fixture passed OAuth navigation, PKCE code-verifier exchange, cancellation without unlocking the café, session persistence, logout with popup removal, and the gameplay/offline checks. It intercepts only the existing Supabase origin. Fictional sessions never reach the hosted database. These controlled tests do not claim a completed real Google account login.
+
+The live authorization endpoint and its newly generated PKCE flow confirmed the production origin was not initially in Redirect URLs: the recorded referrer fell back to `http://localhost:3000`. Adding `https://my-cloud-cafe.netlify.app` to the existing allowlist is required before publishing this login-required build. The Supabase plugin has no Auth configuration write tool, the CLI has no access token, and Windows Computer Use rejected URL verification; the exact dashboard change was requested from the project owner.
 
 ## Outstanding boundaries
 
