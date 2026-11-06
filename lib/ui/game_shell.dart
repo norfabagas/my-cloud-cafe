@@ -616,7 +616,7 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
               ),
               const SizedBox(height: 5),
               Text(
-                '${r.price} koin · ${r.seconds} detik\n${r.steps.map((s) => '${s.ingredient} ${s.seconds} dtk').join(' → ')}',
+                '${r.price} koin · ${r.seconds} detik\n${r.steps.map((s) => '${s.ingredient} ${s.seconds} dtk').join(' + ')}',
                 style: const TextStyle(fontSize: 12, color: muted, height: 1.6),
               ),
               if (s.unlocked.contains(r.id))
@@ -1086,7 +1086,7 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
   }
 
   Widget _help() => const Text(
-    '1. Ketuk pelanggan atau kartu pesanan di atas.\n\n2. Ketuk alat yang diminta, tunggu bahan selesai, lalu ketuk alat untuk bahan berikutnya. Contoh latte: mesin espresso → milk steamer → Sajikan.\n\n3. Buka Menu untuk mempelajari dan mengatur resep. Setiap resep selesai dalam 5–12 detik waktu pembuatan aktif.\n\n4. Beli perabot di Toko, lalu ketuk ubin kosong. Kursi harus di sebelah meja. Alat hanya bisa diletakkan di meja bar, meja kayu, atau meja kerja kosong.\n\n5. Aktifkan Atur ruang. Tahan perabot atau alat, lalu seret dan lepaskan di tujuan. Kamu juga bisa mengetuk perabot untuk memilih koordinat.\n\n6. Cubit dengan dua jari untuk zoom. Seret ruang untuk menggeser kamera; sudut pandang tidak berputar.\n\n7. Rekrut maksimal 3 staf. Atur tugas dan beri istirahat saat energinya habis. Kamu selalu bisa menyiapkan bahan dan menyajikan sendiri.',
+    '1. Ketuk pelanggan atau kartu pesanan di atas.\n\n2. Ketuk alat yang diminta, tunggu bahan selesai, lalu ketuk alat untuk bahan berikutnya. Contoh latte: mesin espresso + milk steamer + Sajikan.\n\n3. Buka Menu untuk mempelajari dan mengatur resep. Setiap resep selesai dalam 5–12 detik waktu pembuatan aktif.\n\n4. Beli perabot di Toko, lalu ketuk ubin kosong. Kursi harus di sebelah meja. Alat hanya bisa diletakkan di meja bar, meja kayu, atau meja kerja kosong.\n\n5. Aktifkan Atur ruang. Tahan perabot atau alat, lalu seret dan lepaskan di tujuan. Kamu juga bisa mengetuk perabot untuk memilih koordinat.\n\n6. Cubit dengan dua jari untuk zoom. Seret ruang untuk menggeser kamera; sudut pandang tidak berputar.\n\n7. Rekrut maksimal 3 staf. Atur tugas dan beri istirahat saat energinya habis. Kamu selalu bisa menyiapkan bahan dan menyajikan sendiri.',
     style: TextStyle(height: 1.7, fontSize: 14),
   );
   Widget _card(Widget child) => Padding(
