@@ -12,6 +12,33 @@ class Recipe {
     this.seconds,
     this.level,
   );
+  List<RecipeStep> get steps => switch (id) {
+    'latte' => const [
+      RecipeStep('coffee', 'Espresso', 4),
+      RecipeStep('milk', 'Susu', 4),
+    ],
+    'mocha' => const [
+      RecipeStep('coffee', 'Espresso', 3),
+      RecipeStep('chocolate', 'Cokelat', 3),
+      RecipeStep('milk', 'Susu', 4),
+    ],
+    'matcha' => const [
+      RecipeStep('tea', 'Matcha', 5),
+      RecipeStep('milk', 'Susu', 5),
+    ],
+    'affogato' => const [
+      RecipeStep('coffee', 'Espresso', 5),
+      RecipeStep('freezer', 'Es krim', 7),
+    ],
+    _ => [RecipeStep(equipment, name, seconds)],
+  };
+  Set<String> get tools => steps.map((s) => s.tool).toSet();
+}
+
+class RecipeStep {
+  final String tool, ingredient;
+  final int seconds;
+  const RecipeStep(this.tool, this.ingredient, this.seconds);
 }
 
 const recipes = [
@@ -121,6 +148,7 @@ const equipment = [
   ),
   Equipment('tea', 'Penyeduh teh', 'Membuka menu teh dan matcha.', 100, 1),
   Equipment('milk', 'Milk steamer', 'Untuk latte dan mocha.', 180, 2),
+  Equipment('chocolate', 'Dispenser cokelat', 'Cokelat untuk mocha.', 120, 3),
   Equipment(
     'oven',
     'Oven kecil',
@@ -139,6 +167,8 @@ class Furniture {
 
 const furniture = [
   Furniture('table', 'Meja kayu', '🪑', 90, 2),
+  Furniture('chair', 'Kursi', '🪑', 35, 1),
+  Furniture('counter', 'Meja kerja', '▰', 70, 1),
   Furniture('plant', 'Tanaman', '🌿', 45, 3),
   Furniture('lamp', 'Lampu lantai', '💡', 70, 4),
   Furniture('shelf', 'Rak buku', '📚', 120, 6),

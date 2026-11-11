@@ -155,6 +155,9 @@ void main() {
         store: store,
         engine: engine,
       );
+      await store.save(
+        engine.state,
+      ); // Existing guest progress predates the login gate.
       addTearDown(controller.dispose);
       addTearDown(engine.dispose);
       await controller.initialize();

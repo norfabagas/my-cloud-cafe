@@ -1,60 +1,28 @@
 import 'package:flutter/material.dart';
-
 import 'cloud_controller.dart';
 
-class AccountPanel extends StatefulWidget {
+class AccountPanel extends StatelessWidget {
   final CloudController controller;
   const AccountPanel({super.key, required this.controller});
-
-  @override
-  State<AccountPanel> createState() => _AccountPanelState();
-}
-
-class _AccountPanelState extends State<AccountPanel> {
-  final _form = GlobalKey<FormState>();
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-  bool _register = false;
-
-  @override
-  void dispose() {
-    _email.dispose();
-    _password.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (!(_form.currentState?.validate() ?? false)) return;
-    FocusScope.of(context).unfocus();
-    final controller = widget.controller;
-    if (_register) {
-      await controller.signUp(_email.text, _password.text);
-    } else {
-      await controller.signIn(_email.text, _password.text);
-    }
-    _password.clear();
-  }
-
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.controller,
+    listenable: controller,
     builder: (context, _) {
-      final c = widget.controller;
-      final signedIn = c.userEmail != null;
+      final c = controller, signedIn = c.signedIn;
       return Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Akun & cadangan',
+              signedIn ? 'Akun & cadangan' : 'Masuk ke kafe',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
             Text(
               signedIn
-                  ? c.userEmail!
-                  : 'Main tanpa akun tetap bisa. Masuk untuk menyimpan progres antarperangkat.',
+                  ? c.userEmail ?? 'Akun terhubung'
+                  : 'Masuk dengan akun Google untuk bermain dan menyimpan progres antarperangkat.',
             ),
             const SizedBox(height: 16),
             Semantics(liveRegion: true, child: Text(c.status)),
@@ -65,11 +33,23 @@ class _AccountPanelState extends State<AccountPanel> {
             const SizedBox(height: 20),
             if (!c.configured)
               const Text(
-                'Sinkronisasi belum tersedia. Progres tetap tersimpan di perangkat ini.',
+                'Login belum tersedia. Muat ulang atau coba kembali nanti.',
               )
-            else if (signedIn) ...[
+            else if (!signedIn) ...[
+              FilledButton.icon(
+                key: const ValueKey('google-login'),
+                onPressed: c.busy ? null : c.signInWithGoogle,
+                icon: const Icon(Icons.login),
+                label: const Text('Masuk dengan Google'),
+              ),
+              const SizedBox(height: 12),
               const Text(
-                'Cadangan otomatis diperiksa setiap 30 detik saat game terbuka. Progres tamu disimpan terpisah di perangkat ini.',
+                'Kamu akan kembali ke kafe setelah login. Tidak perlu membuat kata sandi baru.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ] else ...[
+              const Text(
+                'Cadangan otomatis diperiksa setiap 30 detik saat game terbuka. Progres tersimpan terpisah untuk setiap akun.',
               ),
               const SizedBox(height: 16),
               if (c.conflict) ...[
@@ -135,83 +115,14 @@ class _AccountPanelState extends State<AccountPanel> {
                     label: const Text('Sinkronkan sekarang'),
                   ),
                   OutlinedButton(
-                    onPressed: c.busy ? null : c.signOut,
-                    child: const Text('Keluar ke mode tamu'),
+                    onPressed: c.authenticating || c.switchingAccount
+                        ? null
+                        : c.signOut,
+                    child: const Text('Keluar'),
                   ),
                 ],
               ),
-            ] else
-              AutofillGroup(
-                child: Form(
-                  key: _form,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TextFormField(
-                        controller: _email,
-                        enabled: !c.busy,
-                        decoration: const InputDecoration(labelText: 'Email'),
-                        keyboardType: TextInputType.emailAddress,
-                        textInputAction: TextInputAction.next,
-                        autocorrect: false,
-                        autofillHints: const [AutofillHints.email],
-                        validator: (value) =>
-                            value != null &&
-                                RegExp(
-                                  r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
-                                ).hasMatch(value.trim())
-                            ? null
-                            : 'Masukkan email yang valid.',
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _password,
-                        enabled: !c.busy,
-                        decoration: const InputDecoration(
-                          labelText: 'Kata sandi',
-                        ),
-                        obscureText: true,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        autofillHints: [
-                          _register
-                              ? AutofillHints.newPassword
-                              : AutofillHints.password,
-                        ],
-                        onFieldSubmitted: (_) {
-                          if (!c.busy) _submit();
-                        },
-                        validator: (value) => value == null || value.isEmpty
-                            ? 'Masukkan kata sandi.'
-                            : _register && value.length < 8
-                            ? 'Gunakan setidaknya 8 karakter.'
-                            : null,
-                      ),
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        onPressed: c.busy ? null : _submit,
-                        child: Text(_register ? 'Buat akun' : 'Masuk'),
-                      ),
-                      TextButton(
-                        onPressed: c.busy
-                            ? null
-                            : () => setState(() {
-                                _register = !_register;
-                              }),
-                        child: Text(
-                          _register
-                              ? 'Sudah punya akun? Masuk'
-                              : 'Belum punya akun? Daftar',
-                        ),
-                      ),
-                      if (_register)
-                        const Text(
-                          'Setelah mendaftar, konfirmasi email lalu kembali ke game ini untuk masuk.',
-                        ),
-                    ],
-                  ),
-                ),
-              ),
+            ],
           ],
         ),
       );

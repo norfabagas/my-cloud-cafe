@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
 import '../game/catalog.dart';
 import '../game/engine.dart';
 import '../game/state.dart';
@@ -14,28 +12,6 @@ const ink = Color(0xFF263F36),
     sage = Color(0xFF436C59),
     cream = Color(0xFFF7F4EC),
     muted = Color(0xFF737D72);
-const labels = [
-  'Kafe',
-  'Resep',
-  'Dekorasi',
-  'Cerita',
-  'Lainnya',
-  'Peralatan',
-  'Tim',
-  'Progres',
-  'Akun & data',
-];
-const icons = [
-  Icons.storefront_outlined,
-  Icons.coffee_outlined,
-  Icons.chair_outlined,
-  Icons.forum_outlined,
-  Icons.grid_view_rounded,
-  Icons.kitchen_outlined,
-  Icons.people_outline,
-  Icons.insights_outlined,
-  Icons.cloud_outlined,
-];
 
 class GameShell extends StatefulWidget {
   final GameEngine engine;
@@ -54,10 +30,10 @@ class GameShell extends StatefulWidget {
 }
 
 class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
-  int page = 0;
-  String? placing;
-  int? moving;
   Timer? tick, checkpoint;
+  int? selectedOrder;
+  bool editing = false;
+  String? placing;
   String saveStatus = 'Tersimpan di perangkat';
   GameEngine get game => widget.engine;
   CafeState get s => game.state;
@@ -65,13 +41,12 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    game.resume();
     _start();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.store.warning != null) _toast(widget.store.warning!);
       if (game.offlineCoins > 0) {
-        _toast(
-          'Selamat datang kembali. Ayu menghasilkan ${game.offlineCoins} koin saat kamu pergi.',
-        );
+        _toast('Tim menghasilkan ${game.offlineCoins} koin saat kamu pergi.');
       }
     });
   }
@@ -79,7 +54,10 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
   void _start() {
     tick?.cancel();
     checkpoint?.cancel();
-    tick = Timer.periodic(const Duration(seconds: 1), (_) => game.tick());
+    tick = Timer.periodic(
+      const Duration(milliseconds: 200),
+      (_) => game.tick(),
+    );
     checkpoint = Timer.periodic(const Duration(seconds: 10), (_) => _save());
   }
 
@@ -103,12 +81,11 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       game.resume();
       _start();
-      _save();
     } else {
       tick?.cancel();
       checkpoint?.cancel();
-      _save();
     }
+    _save();
   }
 
   @override
@@ -119,945 +96,726 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  void _toast(String value) {
+  void _toast(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text(value),
+          content: Text(text),
           behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 2),
         ),
       );
   }
 
   void _act(String Function() fn) {
     _toast(fn());
-    _save();
+    unawaited(_save());
   }
 
-  void _navigate(int value) => setState(() {
-    page = value;
+  void _select(int id) => setState(() {
+    selectedOrder = id;
+    editing = false;
     placing = null;
-    moving = null;
   });
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: game,
-    builder: (context, _) => LayoutBuilder(
-      builder: (context, bounds) {
-        final wide = bounds.maxWidth >= 960;
-        return Scaffold(
-          backgroundColor: cream,
-          body: SafeArea(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+  void _tool(String tool) {
+    if (editing) {
+      _moveToolDialog(tool);
+      return;
+    }
+    final o = s.orders.where((o) => o.id == selectedOrder).firstOrNull;
+    if (o == null) {
+      _toast('Pilih pelanggan atau pesanan dahulu.');
+      return;
+    }
+    _act(() => game.prepare(o.id, tool));
+  }
+
+  Future<void> _popup(String title, Widget Function() content) async {
+    await showDialog<void>(
+      context: context,
+      useRootNavigator: false,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        clipBehavior: Clip.antiAlias,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 760,
+            maxHeight: MediaQuery.sizeOf(dialogContext).height * .85,
+          ),
+          child: AnimatedBuilder(
+            animation: game,
+            builder: (context, _) => Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                if (wide) _sidebar(),
-                Expanded(
-                  child: Column(
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 8, 8),
+                  child: Row(
                     children: [
-                      _header(wide),
                       Expanded(
-                        child: SingleChildScrollView(
-                          padding: EdgeInsets.fromLTRB(
-                            wide ? 32 : 16,
-                            8,
-                            wide ? 32 : 16,
-                            28,
-                          ),
-                          child: Align(
-                            alignment: Alignment.topCenter,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 1280),
-                              child: _page(wide),
-                            ),
+                        child: Text(
+                          title == 'Tim'
+                              ? 'Tim · ${s.workers.length}/3 staf'
+                              : title,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                       ),
+                      IconButton(
+                        tooltip: 'Tutup',
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close),
+                      ),
                     ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: content(),
                   ),
                 ),
               ],
             ),
           ),
-          bottomNavigationBar: wide
-              ? null
-              : NavigationBar(
-                  selectedIndex: page < 5 ? page : 4,
-                  onDestinationSelected: _navigate,
-                  backgroundColor: const Color(0xFFFFFDF7),
-                  destinations: List.generate(
-                    5,
-                    (i) => NavigationDestination(
-                      icon: Icon(icons[i]),
-                      label: labels[i],
-                    ),
-                  ),
-                ),
-        );
-      },
-    ),
-  );
-  Widget _sidebar() => Container(
-    width: 210,
-    decoration: const BoxDecoration(
-      color: Color(0xFFFFFDF7),
-      border: Border(right: BorderSide(color: Color(0xFFE4E7DC))),
-    ),
-    child: SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: game,
+    builder: (context, _) => Scaffold(
+      backgroundColor: const Color(0xFFE8EDE1),
+      body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(9),
-                  decoration: BoxDecoration(
-                    color: sage,
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                  child: const Icon(
-                    Icons.coffee_rounded,
-                    color: Colors.white,
-                    size: 26,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'MY CLOUD\nCAFÉ',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        height: 1.15,
-                        letterSpacing: 1.3,
+            _header(),
+            Expanded(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 25, bottom: 130),
+                      child: CafeScene(
+                        key: const ValueKey('live-cafe'),
+                        state: s,
+                        engine: game,
+                        editing: editing,
+                        selectedOrder: selectedOrder,
+                        onCustomer: _select,
+                        onTool: _tool,
+                        onTile: _onTile,
+                        onMove: (index, tool, x, y) {
+                          if (tool != null) {
+                            _act(() => game.moveTool(tool, x, y));
+                          } else if (index != null) {
+                            _act(
+                              () => game.place(
+                                s.decor[index].kind,
+                                x,
+                                y,
+                                moving: index,
+                              ),
+                            );
+                          }
+                        },
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 42),
-            const Text(
-              'KAFE MILIKMU',
-              style: TextStyle(
-                fontSize: 10,
-                color: muted,
-                letterSpacing: 2,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            for (final i in [0, 1, 5, 2, 6, 3, 7])
-              Padding(
-                padding: const EdgeInsets.only(bottom: 7),
-                child: _navTile(i),
-              ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0F3E9),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.wifi_off_rounded, size: 20, color: sage),
-                  SizedBox(height: 8),
-                  Text(
-                    'Bisa main offline',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  Positioned(top: 4, left: 12, right: 12, child: _orders()),
+                  Positioned(
+                    top: 64,
+                    right: 12,
+                    child: Column(
+                      children: [
+                        _glass(
+                          child: IconButton(
+                            tooltip: editing
+                                ? 'Selesai atur ruang'
+                                : 'Atur ruang',
+                            onPressed: () => setState(() {
+                              editing = !editing;
+                              placing = null;
+                            }),
+                            icon: Icon(
+                              editing ? Icons.check : Icons.open_with,
+                              color: sage,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        _glass(
+                          child: IconButton(
+                            tooltip: 'Cara bermain',
+                            onPressed: () => _popup('Cara bermain', _help),
+                            icon: const Icon(Icons.help_outline, color: sage),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  SizedBox(height: 5),
-                  Text(
-                    'Kafe tetap di perangkatmu.',
-                    style: TextStyle(fontSize: 11, color: muted),
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 12,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (editing)
+                          _layoutHint()
+                        else if (s.orders.any((o) => o.id == selectedOrder))
+                          _preparation(
+                            s.orders.firstWhere((o) => o.id == selectedOrder),
+                          )
+                        else
+                          _glass(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Text(
+                                s.orders.isEmpty
+                                    ? 'Pelanggan baru akan segera datang.'
+                                    : 'Pilih pelanggan, lalu ketuk alat untuk menyiapkan pesanannya.',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: sage,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        _tools(),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 18),
-            _navTile(8),
-            const SizedBox(height: 8),
+            _toolbar(),
           ],
         ),
       ),
     ),
   );
-  Widget _navTile(int i) => Material(
-    color: page == i ? const Color(0xFFEAF0E5) : Colors.transparent,
-    borderRadius: BorderRadius.circular(12),
-    child: InkWell(
-      onTap: () => _navigate(i),
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
-        child: Row(
-          children: [
-            Icon(icons[i], color: page == i ? sage : muted, size: 21),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                labels[i],
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: page == i ? FontWeight.w700 : FontWeight.w500,
-                  color: page == i ? ink : muted,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-  Widget _header(bool wide) => Padding(
-    padding: EdgeInsets.fromLTRB(
-      wide ? 32 : 16,
-      wide ? 26 : 16,
-      wide ? 32 : 16,
-      18,
-    ),
+  Widget _header() => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    color: const Color(0xFFFFFDF6),
     child: Row(
       children: [
-        Expanded(
+        const Icon(Icons.local_cafe, color: sage, size: 26),
+        const SizedBox(width: 10),
+        const Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'MY CLOUD CAFÉ',
-                style: const TextStyle(
-                  color: muted,
-                  fontSize: 10,
-                  letterSpacing: 2.2,
-                  fontWeight: FontWeight.w700,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1,
                 ),
               ),
-              const SizedBox(height: 5),
               Text(
-                page == 0 ? 'Kafe hari ini' : labels[page],
-                style: TextStyle(
-                  fontSize: wide ? 30 : 24,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -.8,
-                ),
+                'Kafe hari ini',
+                style: TextStyle(fontSize: 10, color: muted),
               ),
             ],
           ),
         ),
-        _pill(
-          Icons.star_rounded,
-          'Lv. ${s.level}',
-          const Color(0xFFECEEDC),
-          sage,
-        ),
-        const SizedBox(width: 8),
-        _pill(
-          Icons.toll_rounded,
-          '${s.coins}',
-          const Color(0xFFF5E6BC),
-          const Color(0xFF8D6530),
-        ),
-        if (wide) ...[
-          const SizedBox(width: 16),
-          IconButton(
-            tooltip: 'Akun dan cadangan',
-            onPressed: () => _navigate(8),
-            icon: const Icon(Icons.cloud_done_outlined, color: sage),
-          ),
-        ],
-      ],
-    ),
-  );
-  Widget _pill(IconData icon, String value, Color bg, Color fg) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-    decoration: BoxDecoration(
-      color: bg,
-      borderRadius: BorderRadius.circular(30),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 18, color: fg),
-        const SizedBox(width: 5),
         Text(
-          value,
-          style: TextStyle(
-            color: fg,
-            fontWeight: FontWeight.w800,
-            fontSize: 13,
+          'Lv. ${s.level}',
+          style: const TextStyle(
+            fontSize: 12,
+            color: sage,
+            fontWeight: FontWeight.w700,
           ),
         ),
+        const SizedBox(width: 12),
+        const Icon(Icons.toll, color: Color(0xFFB18A45), size: 19),
+        const SizedBox(width: 4),
+        Text('${s.coins}', style: const TextStyle(fontWeight: FontWeight.w800)),
       ],
     ),
   );
-  Widget _page(bool wide) => switch (page) {
-    0 => _cafe(wide),
-    1 => _recipes(),
-    2 => _decoration(),
-    3 => _stories(),
-    5 => _equipment(),
-    6 => _team(),
-    7 => _progress(),
-    8 => _data(),
-    _ => _more(),
-  };
-  Widget _cafe(bool wide) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      if (s.served == 0)
-        _notice(
-          'Mulai dari secangkir espresso',
-          'Tekan Siapkan pada pesanan, lalu Sajikan saat selesai.',
-          Icons.waving_hand_outlined,
-        ),
-      const SizedBox(height: 12),
-      if (wide)
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(flex: 7, child: _room()),
-            const SizedBox(width: 20),
-            Expanded(flex: 3, child: _daily()),
-          ],
-        )
-      else ...[
-        _room(),
-        const SizedBox(height: 16),
-        _daily(),
-      ],
-      const SizedBox(height: 26),
-      _section(
-        'Pesanan masuk',
-        '${s.orders.length} / ${s.capacity} kursi',
-        action: TextButton(
-          onPressed: () => _navigate(1),
-          child: const Text('Lihat menu'),
-        ),
-      ),
-      const SizedBox(height: 12),
-      if (s.orders.isEmpty)
-        _notice(
-          'Meja sudah rapi',
-          'Pelanggan berikutnya akan datang sebentar lagi.',
-          Icons.coffee_outlined,
-        )
-      else
-        LayoutBuilder(
-          builder: (context, b) => Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: s.orders
-                .map(
-                  (o) => SizedBox(
-                    width: b.maxWidth < 600
-                        ? b.maxWidth
-                        : (b.maxWidth - 24) / math.min(3, s.orders.length),
-                    child: _order(o),
-                  ),
-                )
-                .toList(),
-          ),
-        ),
-      const SizedBox(height: 22),
-      Row(
-        children: [
-          const Icon(Icons.check_circle_outline, size: 14, color: muted),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              saveStatus,
-              style: const TextStyle(fontSize: 11, color: muted),
-            ),
-          ),
-          Text(
-            '${s.served} pesanan selesai',
-            style: const TextStyle(fontSize: 11, color: muted),
-          ),
-        ],
-      ),
-    ],
-  );
-  Widget _room({bool edit = false}) => _card(
-    padding: 0,
-    child: Column(
+  Widget _orders() => SizedBox(
+    height: 50,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-          child: Row(
-            children: [
-              Container(
-                width: 7,
-                height: 7,
-                decoration: const BoxDecoration(
-                  color: sage,
-                  shape: BoxShape.circle,
+        for (final o in s.orders)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              selected: selectedOrder == o.id,
+              onSelected: (_) => _select(o.id),
+              avatar: CircleAvatar(
+                backgroundColor:
+                    PeoplePainter.shirts[(s.customers
+                                .where((c) => c.id == o.customerId)
+                                .firstOrNull
+                                ?.look ??
+                            o.id) %
+                        6],
+                child: Text(
+                  o.name[0],
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
               ),
-              const SizedBox(width: 7),
-              const Text(
-                'BUKA',
-                style: TextStyle(
-                  fontSize: 10,
-                  letterSpacing: 1.5,
-                  fontWeight: FontWeight.w800,
-                  color: sage,
-                ),
+              label: Text(
+                '${o.name} · ${recipeById(o.recipe).name}',
+                style: const TextStyle(fontSize: 11),
               ),
-              const Spacer(),
-              Icon(
-                Icons.wb_sunny_outlined,
-                size: 16,
-                color: Colors.amber.shade800,
-              ),
-              const SizedBox(width: 5),
-              Text(
-                '${s.capacity} meja · ${s.charm} suasana',
-                style: const TextStyle(fontSize: 11, color: muted),
-              ),
-            ],
-          ),
-        ),
-        DecoratedBox(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFFFFDF8), Color(0xFFF1F2E4)],
             ),
           ),
-          child: CafeScene(
-            state: s,
-            editing: edit,
-            selected: moving,
-            onTile: edit ? (x, y) => _onTile(x, y) : null,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-          child: Row(
-            children: [
-              const Icon(Icons.chair_alt_outlined, size: 17, color: sage),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  edit
-                      ? placing != null
-                            ? 'Ketuk ubin untuk menempatkan ${furniture.firstWhere((f) => f.id == placing).name.toLowerCase()}'
-                            : moving != null
-                            ? 'Ketuk ubin tujuan'
-                            : 'Ketuk perabot untuk memindahkannya'
-                      : 'Sudut kecilmu di tengah kota',
-                  style: const TextStyle(fontSize: 12, color: muted),
-                ),
-              ),
-              if (!edit)
-                TextButton(
-                  onPressed: () => _navigate(2),
-                  child: const Text('Atur ruang'),
-                ),
-            ],
-          ),
-        ),
+        if (s.orders.isEmpty)
+          const Chip(label: Text('Meja siap · menunggu pelanggan')),
       ],
     ),
   );
-  Widget _daily() {
-    final goal = GameEngine.goalTargets.indexWhere((t) => t > s.served);
-    final target = goal < 0 ? 60 : GameEngine.goalTargets[goal];
-    return _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Sedikit demi sedikit',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Kembangkan kafe dengan ritmemu.',
-            style: TextStyle(color: muted, fontSize: 12),
-          ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              const Icon(Icons.local_cafe_outlined, color: sage, size: 21),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Layani $target pesanan',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Text(
-                '${math.min(s.served, target)}/$target',
-                style: const TextStyle(color: muted, fontSize: 11),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          LinearProgressIndicator(
-            value: (s.served / target).clamp(0, 1),
-            minHeight: 6,
-            borderRadius: BorderRadius.circular(8),
-            backgroundColor: const Color(0xFFEAEDE1),
-          ),
-          const SizedBox(height: 18),
-          _smallStat('Level berikutnya', '${s.xp % 100} / 100 XP'),
-          const SizedBox(height: 12),
-          _smallStat(
-            'Tip dari suasana',
-            '+${math.min(s.charm ~/ 3, 20)} / pesanan',
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: () => _navigate(7),
-              child: const Text('Lihat target'),
-            ),
-          ),
-          const Divider(height: 32),
-          Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: const Color(0xFFF5DFCC),
-                child: Text(
-                  s.staff ? 'A' : 'N',
-                  style: const TextStyle(
-                    color: Color(0xFF976348),
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _preparation(Order o) {
+    final r = recipeById(o.recipe),
+        b = game.brewFor(o.id),
+        step = game.nextStep(o.id),
+        cooking = b != null && b.readyAt > game.now,
+        ready = b != null && !cooking && step == null,
+        arriving = game.now < o.arrivedAt + GameEngine.walkMillis;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 430),
+        child: _glass(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 8, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
                   children: [
-                    Text(
-                      s.staff ? 'Ayu sedang bertugas' : 'Kenalan dengan Nara',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                    Expanded(
+                      child: Text(
+                        '${o.name} · ${r.name}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                     Text(
-                      s.staff
-                          ? 'Pesanan dibantu otomatis'
-                          : 'Cerita pertama · 1 pesanan',
-                      style: const TextStyle(fontSize: 11, color: muted),
+                      '+${r.price}',
+                      style: const TextStyle(
+                        color: sage,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Tutup pesanan',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => setState(() => selectedOrder = null),
+                      icon: const Icon(Icons.close, size: 17),
                     ),
                   ],
                 ),
-              ),
-            ],
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final entry in r.steps.indexed)
+                      Text(
+                        '${b != null && (entry.$1 < b.step || (entry.$1 == b.step && !cooking)) ? 'OK' : '${entry.$1 + 1}.'} ${entry.$2.ingredient} (${entry.$2.seconds} dtk)',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: b != null && entry.$1 <= b.step ? sage : muted,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (cooking) ...[
+                  LinearProgressIndicator(
+                    value:
+                        ((game.now - b.startedAt) / (b.readyAt - b.startedAt))
+                            .clamp(0, 1),
+                    minHeight: 5,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Menyiapkan ${r.steps[b.step].ingredient} · ${math.max(0, ((b.readyAt - game.now) / 1000).ceil())} dtk',
+                    style: const TextStyle(fontSize: 12, color: sage),
+                  ),
+                ] else if (ready)
+                  FilledButton.icon(
+                    key: ValueKey('serve-${o.id}'),
+                    onPressed: () => _act(() => game.serve(o.id)),
+                    icon: const Icon(Icons.room_service_outlined, size: 18),
+                    label: const Text('Sajikan'),
+                  )
+                else
+                  Text(
+                    arriving
+                        ? 'Pelanggan sedang menuju kursi…'
+                        : 'Ketuk ${equipment.firstWhere((e) => e.id == step!.tool).name} untuk ${step!.ingredient.toLowerCase()}.',
+                    style: const TextStyle(fontSize: 12, color: sage),
+                  ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: () => _navigate(s.staff ? 6 : 3),
-            child: Text(s.staff ? 'Lihat tim' : 'Buka cerita'),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _order(Order o) {
-    final r = recipeById(o.recipe),
-        brews = s.brews.where((b) => b.orderId == o.id);
-    final brew = brews.isEmpty ? null : brews.first,
-        ready = brew != null && brew.readyAt <= game.now;
-    final seconds = brew == null
-        ? 0
-        : math.max(0, ((brew.readyAt - game.now) / 1000).ceil());
-    return _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _tools() => _glass(
+    child: SizedBox(
+      height: 62,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
         children: [
-          Row(
+          for (final e in equipment.where((e) => s.machines.contains(e.id)))
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: OutlinedButton.icon(
+                key: ValueKey('tool-${e.id}'),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor:
+                      game.nextStep(selectedOrder ?? -1)?.tool == e.id
+                      ? const Color(0xFFE8EFD9)
+                      : Colors.white,
+                  side: BorderSide(
+                    color: game.toolAvailable(e.id) ? sage : Colors.grey,
+                  ),
+                ),
+                onPressed: editing
+                    ? () => _moveToolDialog(e.id)
+                    : () => _tool(e.id),
+                icon: Icon(_toolIcon(e.id), size: 20),
+                label: Text(
+                  '${e.name}${game.toolAvailable(e.id) ? '' : ' · sibuk'}',
+                  style: const TextStyle(fontSize: 11),
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+  IconData _toolIcon(String id) => switch (id) {
+    'coffee' => Icons.coffee_maker_outlined,
+    'tea' => Icons.emoji_food_beverage_outlined,
+    'milk' => Icons.water_drop_outlined,
+    'oven' => Icons.microwave,
+    'freezer' => Icons.ac_unit,
+    _ => Icons.cookie_outlined,
+  };
+  Widget _toolbar() => Container(
+    color: const Color(0xFFFFFDF6),
+    height: 66,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      children: [
+        _nav('Menu', Icons.menu_book, () => _popup('Menu & resep', _recipes)),
+        _nav(
+          'Toko',
+          Icons.chair_outlined,
+          () => _popup('Toko & peralatan', _shop),
+        ),
+        _nav('Tim', Icons.people_outline, () => _popup('Tim', _team)),
+        _nav(
+          'Pelanggan',
+          Icons.badge_outlined,
+          () => _popup('Buku pelanggan', _customers),
+        ),
+        _nav(
+          'Cerita',
+          Icons.forum_outlined,
+          () => _popup('Cerita & target', _stories),
+        ),
+        _nav(
+          'Akun & data',
+          Icons.cloud_outlined,
+          () => _popup('Akun & data', _data),
+        ),
+      ],
+    ),
+  );
+  Widget _nav(String name, IconData icon, VoidCallback action) => TextButton(
+    onPressed: action,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 21, color: sage),
+          const SizedBox(height: 4),
+          Text(name, style: const TextStyle(fontSize: 10, color: ink)),
+        ],
+      ),
+    ),
+  );
+  Widget _layoutHint() => _glass(
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              placing == null
+                  ? 'Tahan lalu seret perabot atau alat. Cubit dengan dua jari untuk zoom.'
+                  : 'Ketuk ubin kosong untuk ${furniture.firstWhere((f) => f.id == placing).name}.',
+              style: const TextStyle(fontSize: 12, color: sage),
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() {
+              placing = null;
+              editing = false;
+            }),
+            child: const Text('Selesai'),
+          ),
+        ],
+      ),
+    ),
+  );
+  void _onTile(int x, int y) {
+    if (placing != null) {
+      final count = s.decor.length;
+      _act(() => game.place(placing!, x, y));
+      if (s.decor.length > count) setState(() => placing = null);
+    } else {
+      final i = s.decor.indexWhere((d) => d.x == x && d.y == y);
+      if (i >= 0) _moveFurnitureDialog(i);
+    }
+  }
+
+  Widget _recipes() => Column(
+    children: [
+      const Text(
+        'Setiap bahan dibuat di alatnya. Matikan menu untuk pesanan baru; pesanan aktif tetap dilayani.',
+        style: TextStyle(color: muted, fontSize: 12),
+      ),
+      const SizedBox(height: 12),
+      for (final r in recipes)
+        _card(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 17,
-                backgroundColor: const Color(0xFFEADDCF),
-                child: Text(
-                  o.name[0],
-                  style: const TextStyle(
-                    color: ink,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  o.name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
               Text(
-                '+${r.price}',
+                r.name,
                 style: const TextStyle(
-                  color: sage,
-                  fontSize: 13,
+                  fontSize: 17,
                   fontWeight: FontWeight.w800,
                 ),
               ),
+              const SizedBox(height: 5),
+              Text(
+                '${r.price} koin · ${r.seconds} detik\n${r.steps.map((s) => '${s.ingredient} ${s.seconds} dtk').join(' + ')}',
+                style: const TextStyle(fontSize: 12, color: muted, height: 1.6),
+              ),
+              if (s.unlocked.contains(r.id))
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Tersedia di menu',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  value: !s.disabledMenu.contains(r.id),
+                  onChanged: (_) => _act(() => game.toggleMenu(r.id)),
+                )
+              else ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Level ${r.level} · alat: ${r.tools.map((t) => equipment.firstWhere((e) => e.id == t).name).join(', ')}',
+                  style: const TextStyle(fontSize: 11, color: muted),
+                ),
+                const SizedBox(height: 8),
+                FilledButton(
+                  onPressed: () => _act(() => game.unlockRecipe(r)),
+                  child: Text('Pelajari · ${r.cost} koin'),
+                ),
+              ],
             ],
           ),
-          const SizedBox(height: 16),
+        ),
+    ],
+  );
+  Widget _shop() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Peralatan',
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+      ),
+      const Text(
+        'Alat wajib berada di meja bar atau meja kerja. Tahan dan seret dalam mode Atur ruang.',
+        style: TextStyle(fontSize: 12, color: muted),
+      ),
+      const SizedBox(height: 12),
+      for (final e in equipment)
+        _card(
           Row(
             children: [
-              Text(
-                r.symbol,
-                style: const TextStyle(fontFamily: 'CafeEmoji', fontSize: 30),
-              ),
+              Icon(_toolIcon(e.id), color: sage),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      r.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                      ),
+                      e.name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    const SizedBox(height: 4),
                     Text(
-                      brew == null
-                          ? 'Menunggu · ${math.max(0, ((o.deadline - game.now) / 1000).ceil())} dtk'
-                          : ready
-                          ? 'Siap diantar'
-                          : 'Disiapkan · $seconds dtk',
+                      'Level ${e.level} · ${e.cost} koin',
                       style: const TextStyle(fontSize: 11, color: muted),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: s.machines.contains(e.id)
+                    ? () => _moveToolDialog(e.id)
+                    : () => _act(() => game.unlockEquipment(e)),
+                child: Text(s.machines.contains(e.id) ? 'Pindah' : 'Beli'),
+              ),
             ],
           ),
-          const SizedBox(height: 18),
-          if (brew != null && !ready) ...[
-            LinearProgressIndicator(
-              value:
-                  ((game.now - brew.startedAt) /
-                          (brew.readyAt - brew.startedAt))
-                      .clamp(0, 1),
-              minHeight: 4,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            const SizedBox(height: 12),
-          ],
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: brew == null
-                  ? () => _act(() => game.brew(o.id))
-                  : ready
-                  ? () => _act(() => game.serve(o.id))
-                  : null,
-              child: Text(
-                brew == null
-                    ? 'Siapkan'
-                    : ready
-                    ? 'Sajikan'
-                    : 'Sedang disiapkan',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _recipes() => _catalogGrid(
-    recipes.map((r) {
-      final owned = s.unlocked.contains(r.id),
-          allowed = s.level >= r.level && s.machines.contains(r.equipment);
-      return _card(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _art(
-              r.symbol,
-              owned ? const Color(0xFFEAF0E5) : const Color(0xFFF2EADC),
-            ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    r.name,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                if (owned)
-                  const Icon(Icons.check_circle_rounded, color: sage, size: 19),
-              ],
-            ),
-            const SizedBox(height: 7),
-            Text(
-              r.description,
-              style: const TextStyle(color: muted, fontSize: 12, height: 1.6),
-            ),
-            const SizedBox(height: 18),
-            _smallStat('Harga saji', '${r.price} koin'),
-            const SizedBox(height: 8),
-            _smallStat('Waktu', '${r.seconds} detik'),
-            const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: owned
-                  ? OutlinedButton(
-                      onPressed: null,
-                      child: const Text('Ada di menu'),
-                    )
-                  : FilledButton(
-                      onPressed: allowed
-                          ? () => _act(() => game.unlockRecipe(r))
-                          : null,
-                      child: Text(
-                        s.level < r.level
-                            ? 'Level ${r.level}'
-                            : !s.machines.contains(r.equipment)
-                            ? 'Butuh ${equipment.firstWhere((e) => e.id == r.equipment).name}'
-                            : 'Pelajari · ${r.cost} koin',
-                      ),
-                    ),
-            ),
-          ],
         ),
-      );
-    }).toList(),
-    intro: 'Semua resep dibuka dengan koin hasil melayani pelanggan.',
-  );
-  Widget _equipment() => _catalogGrid(
-    equipment.map((e) {
-      final owned = s.machines.contains(e.id);
-      return _card(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _iconArt(Icons.coffee_maker_outlined),
-            const SizedBox(height: 18),
-            Text(
-              e.name,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              e.description,
-              style: const TextStyle(fontSize: 12, color: muted),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: owned || s.level < e.level
-                    ? null
-                    : () => _act(() => game.unlockEquipment(e)),
-                child: Text(
-                  owned
-                      ? 'Siap digunakan'
-                      : s.level < e.level
-                      ? 'Level ${e.level}'
-                      : 'Siapkan · ${e.cost} koin',
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }).toList(),
-    intro:
-        'Peralatan membuka pilihan menu baru. Dua pesanan bisa disiapkan bersamaan.',
-  );
-  Widget _decoration() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      _room(edit: true),
       const SizedBox(height: 16),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final theme in [
-            ('sage', 'Sage'),
-            ('terracotta', 'Terakota'),
-            ('midnight', 'Senja'),
-          ])
-            ChoiceChip(
-              label: Text(theme.$2),
-              selected: s.theme == theme.$1,
-              onSelected: (_) {
-                game.setTheme(theme.$1);
-                _save();
-              },
-            ),
-          if (placing != null || moving != null)
-            ActionChip(
-              label: const Text('Selesai menata'),
-              avatar: const Icon(Icons.check, size: 16),
-              onPressed: () => setState(() {
-                placing = null;
-                moving = null;
-              }),
-            ),
-        ],
-      ),
-      const SizedBox(height: 22),
       const Text(
-        'Isi ruangmu',
-        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+        'Perabot',
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
       ),
-      const SizedBox(height: 7),
       const Text(
-        'Pilih perabot, lalu ketuk ubin. Untuk memindahkan, ketuk perabot yang ada.',
+        'Kursi bersebelahan dengan meja menerima pelanggan. Maksimal 6 pelanggan sekaligus.',
         style: TextStyle(fontSize: 12, color: muted),
       ),
-      const SizedBox(height: 16),
-      _catalogGrid(
-        furniture
-            .map(
-              (f) => _card(
+      const SizedBox(height: 12),
+      for (final f in furniture)
+        _card(
+          Row(
+            children: [
+              const Icon(Icons.chair_alt, color: sage),
+              const SizedBox(width: 12),
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _art(f.symbol, const Color(0xFFF0E8D8)),
-                    const SizedBox(height: 14),
                     Text(
                       f.name,
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    const SizedBox(height: 7),
                     Text(
-                      '+${f.charm} suasana${f.id == 'table' ? ' · +1 kursi (maks. 6)' : ''}',
-                      style: const TextStyle(fontSize: 12, color: muted),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: () => setState(() {
-                          placing = f.id;
-                          moving = null;
-                        }),
-                        child: Text(
-                          placing == f.id
-                              ? 'Pilih ubin di atas'
-                              : 'Tempatkan · ${f.cost}',
-                        ),
-                      ),
+                      '${f.cost} koin · +${f.charm} suasana',
+                      style: const TextStyle(fontSize: 11, color: muted),
                     ),
                   ],
                 ),
               ),
-            )
-            .toList(),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  setState(() {
+                    placing = f.id;
+                    editing = true;
+                    selectedOrder = null;
+                  });
+                },
+                child: const Text('Tempatkan'),
+              ),
+            ],
+          ),
+        ),
+      const SizedBox(height: 12),
+      const Text(
+        'Warna dinding',
+        style: TextStyle(fontWeight: FontWeight.w700),
       ),
-      const SizedBox(height: 16),
-      _section('Pindahkan perabot', 'Akses tanpa mengetuk denah'),
-      const SizedBox(height: 10),
       Wrap(
         spacing: 8,
-        runSpacing: 8,
-        children: s.decor.indexed
-            .map(
-              (d) => ActionChip(
-                label: Text(
-                  '${furniture.firstWhere((f) => f.id == d.$2.kind).name} (${d.$2.x + 1}, ${d.$2.y + 1})',
-                ),
-                onPressed: () => _moveAccessible(d.$1),
-              ),
-            )
-            .toList(),
+        children: [
+          for (final t in ['sage', 'terracotta', 'midnight'])
+            ChoiceChip(
+              label: Text(t),
+              selected: s.theme == t,
+              onSelected: (_) => game.setTheme(t),
+            ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton(
+        onPressed: () {
+          Navigator.pop(context);
+          setState(() {
+            editing = true;
+            placing = null;
+            selectedOrder = null;
+          });
+        },
+        child: const Text('Atur ruang'),
       ),
     ],
   );
-  void _onTile(int x, int y) {
-    if (placing != null || moving != null) {
-      final result = game.place(
-        placing ?? s.decor[moving!].kind,
-        x,
-        y,
-        moving: moving,
-      );
-      _toast(result);
-      _save();
-      setState(() => moving = null);
-    } else {
-      final index = s.decor.indexWhere((d) => d.x == x && d.y == y);
-      if (index >= 0) setState(() => moving = index);
-    }
-  }
-
-  Future<void> _moveAccessible(int index) async {
-    int x = s.decor[index].x, y = s.decor[index].y;
+  Future<void> _coordinates(
+    String title,
+    int initialX,
+    int initialY,
+    void Function(int, int) apply, {
+    bool tool = false,
+  }) async {
+    var x = initialX, y = initialY;
     await showDialog<void>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, update) => AlertDialog(
-          title: const Text('Pindahkan perabot'),
+      useRootNavigator: false,
+      builder: (c) => StatefulBuilder(
+        builder: (c, update) => AlertDialog(
+          title: Text(title),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<int>(
                 initialValue: x,
                 decoration: const InputDecoration(labelText: 'Kolom'),
-                items: List.generate(
-                  8,
-                  (i) => DropdownMenuItem(value: i, child: Text('${i + 1}')),
-                ),
+                items: [
+                  for (var i = 0; i < 8; i++)
+                    DropdownMenuItem(value: i, child: Text('${i + 1}')),
+                ],
                 onChanged: (v) => update(() => x = v!),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               DropdownButtonFormField<int>(
                 initialValue: y,
                 decoration: const InputDecoration(labelText: 'Baris'),
-                items: List.generate(
-                  5,
-                  (i) =>
-                      DropdownMenuItem(value: i + 1, child: Text('${i + 2}')),
-                ),
+                items: [
+                  for (var i = tool ? 0 : 1; i < 6; i++)
+                    DropdownMenuItem(
+                      value: i,
+                      child: Text(i == 0 ? 'Meja bar' : '${i + 1}'),
+                    ),
+                ],
                 onChanged: (v) => update(() => y = v!),
               ),
             ],
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(c),
               child: const Text('Batal'),
             ),
             FilledButton(
               onPressed: () {
-                Navigator.pop(context);
-                _act(
-                  () => game.place(s.decor[index].kind, x, y, moving: index),
-                );
+                Navigator.pop(c);
+                apply(x, y);
               },
               child: const Text('Pindahkan'),
             ),
@@ -1067,244 +825,184 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
     );
   }
 
-  Widget _stories() => Column(
+  void _moveToolDialog(String id) {
+    final p = s.toolPositions[id]!;
+    _coordinates(
+      equipment.firstWhere((e) => e.id == id).name,
+      p.x,
+      p.y,
+      (x, y) => _act(() => game.moveTool(id, x, y)),
+      tool: true,
+    );
+  }
+
+  void _moveFurnitureDialog(int i) {
+    final d = s.decor[i];
+    _coordinates(
+      furniture.firstWhere((f) => f.id == d.kind).name,
+      d.x,
+      d.y,
+      (x, y) => _act(() => game.place(d.kind, x, y, moving: i)),
+    );
+  }
+
+  Widget _team() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       const Text(
-        'Orang-orang di seberang meja',
-        style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+        'Staf mengikuti langkah resep dan memakai alat yang sama denganmu. Kamu tetap bisa melayani sendiri. Energi habis setelah 12 tugas; istirahat 10 detik untuk memulihkannya.',
+        style: TextStyle(fontSize: 12, color: muted, height: 1.6),
       ),
-      const SizedBox(height: 8),
-      const Text(
-        'Kenali pelangganmu. Cerita baru terbuka seiring pesanan yang selesai.',
-        style: TextStyle(color: muted, fontSize: 13),
-      ),
-      const SizedBox(height: 22),
-      for (final entry in chapters.indexed)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: _card(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 25,
-                  backgroundColor: const Color(0xFFF1DFCD),
-                  child: Text(
-                    entry.$2.name[0],
-                    style: const TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF946B4E),
-                    ),
-                  ),
+      const SizedBox(height: 14),
+      for (final entry in s.workers.indexed)
+        _card(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                entry.$2.name,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
                 ),
-                const SizedBox(width: 18),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${entry.$2.name} · BAB ${entry.$1 + 1}',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          letterSpacing: 1.4,
-                          color: muted,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        entry.$2.title,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        s.stories.contains(entry.$1)
-                            ? entry.$2.response
-                            : entry.$2.line,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          height: 1.7,
-                          color: muted,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        onPressed:
-                            s.stories.contains(entry.$1) ||
-                                s.served < entry.$2.requiredServed
-                            ? null
-                            : () => _openStory(entry.$1),
-                        child: Text(
-                          s.stories.contains(entry.$1)
-                              ? 'Selesai'
-                              : s.served < entry.$2.requiredServed
-                              ? '${entry.$2.requiredServed} pesanan untuk membuka'
-                              : 'Mengobrol · +${entry.$2.reward} koin',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-    ],
-  );
-  void _openStory(int index) => showDialog<void>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(chapters[index].name),
-      content: Text(chapters[index].line),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Nanti'),
-        ),
-        FilledButton(
-          onPressed: () {
-            Navigator.pop(context);
-            _act(() => game.story(index));
-          },
-          child: Text(chapters[index].choice),
-        ),
-      ],
-    ),
-  );
-  Widget _team() => _catalogGrid([
-    _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _art('👩‍🍳', const Color(0xFFF0DFCB)),
-          const SizedBox(height: 18),
-          const Text(
-            'Ayu',
-            style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'BARISTA',
-            style: TextStyle(
-              fontSize: 10,
-              letterSpacing: 1.5,
-              color: sage,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Menyiapkan dan mengantar pesanan otomatis. Saat kafe ditutup, Ayu menghasilkan koin hingga 8 jam.',
-            style: TextStyle(color: muted, fontSize: 13, height: 1.7),
-          ),
-          const SizedBox(height: 18),
-          const Text(
-            'Upah sekali · tidak ada potongan berkala',
-            style: TextStyle(color: muted, fontSize: 11),
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: s.staff ? null : () => _act(game.hire),
-              child: Text(s.staff ? 'Sudah bergabung' : 'Rekrut · 280 koin'),
-            ),
-          ),
-        ],
-      ),
-    ),
-  ], intro: 'Kamu tetap bisa melayani pesanan saat Ayu bertugas.');
-  Widget _progress() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Wrap(
-        spacing: 14,
-        runSpacing: 14,
-        children: [
-          _stat('Pesanan selesai', '${s.served}', Icons.coffee_outlined),
-          _stat('Koin dihasilkan', '${s.earned}', Icons.toll_outlined),
-          _stat(
-            'Resep dipelajari',
-            '${s.unlocked.length} / ${recipes.length}',
-            Icons.menu_book_outlined,
-          ),
-          _stat(
-            'Cerita selesai',
-            '${s.stories.length} / ${chapters.length}',
-            Icons.forum_outlined,
-          ),
-        ],
-      ),
-      const SizedBox(height: 28),
-      _section('Target kafe', 'Hadiah sekali per target'),
-      const SizedBox(height: 16),
-      for (final g in GameEngine.goalTargets.indexed)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: _card(
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.emoji_events_outlined,
-                  color: Color(0xFFAC8146),
-                  size: 30,
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Selesaikan ${g.$2} pesanan',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '+${(g.$1 + 1) * 75} koin',
-                        style: const TextStyle(color: muted, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                FilledButton(
-                  onPressed: s.claimedGoals.contains(g.$1) || s.served < g.$2
-                      ? null
-                      : () => _act(() => game.claimGoal(g.$1)),
-                  child: Text(
-                    s.claimedGoals.contains(g.$1)
-                        ? 'Diklaim'
-                        : s.served < g.$2
-                        ? '${s.served}/${g.$2}'
-                        : 'Klaim',
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-    ],
-  );
-  Widget _more() => Column(
-    children: [
-      for (final i in [5, 6, 7, 8])
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: _card(
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(icons[i], color: sage),
-              title: Text(
-                labels[i],
-                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-              trailing: const Icon(Icons.arrow_forward_rounded),
-              onTap: () => _navigate(i),
-            ),
+              const SizedBox(height: 8),
+              Text(
+                entry.$2.restUntil > game.now
+                    ? 'Istirahat · ${((entry.$2.restUntil - game.now) / 1000).ceil()} dtk'
+                    : 'Energi ${entry.$2.energy}/12',
+                style: const TextStyle(color: sage),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: entry.$2.role,
+                decoration: const InputDecoration(labelText: 'Tugas'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'all',
+                    child: Text('Siapkan & sajikan'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'barista',
+                    child: Text('Barista · siapkan bahan'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'server',
+                    child: Text('Pelayan · sajikan pesanan'),
+                  ),
+                ],
+                onChanged: (v) => _act(() => game.setRole(entry.$1, v!)),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: entry.$2.restUntil > game.now
+                    ? null
+                    : () => _act(() => game.restStaff(entry.$1)),
+                child: const Text('Istirahat · 10 dtk'),
+              ),
+            ],
+          ),
+        ),
+      FilledButton(
+        onPressed: s.workers.length >= 3 ? null : () => _act(game.hire),
+        child: Text(
+          s.workers.length >= 3
+              ? 'Tim lengkap · 3/3'
+              : 'Rekrut ${['Ayu', 'Raka', 'Mira'][s.workers.length]} · ${280 + s.workers.length * 100} koin',
+        ),
+      ),
+    ],
+  );
+  Widget _customers() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Pelanggan baru dicatat otomatis. Identitas dan penampilan tetap sama saat kembali. Data tersimpan di perangkat dan disinkronkan ke akunmu.',
+        style: TextStyle(fontSize: 12, color: muted, height: 1.6),
+      ),
+      const SizedBox(height: 12),
+      for (final c in s.customers)
+        _card(
+          Row(
+            children: [
+              SizedBox(
+                width: 50,
+                height: 68,
+                child: CustomPaint(painter: _Portrait(c.look)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  c.name,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              Text(
+                '${c.visits} kunjungan',
+                style: const TextStyle(color: muted, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+    ],
+  );
+  Widget _stories() => Column(
+    children: [
+      for (final entry in chapters.indexed)
+        _card(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${entry.$2.name} · ${entry.$2.title}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 17,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                s.stories.contains(entry.$1)
+                    ? entry.$2.response
+                    : entry.$2.line,
+                style: const TextStyle(color: muted, height: 1.6),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed:
+                    s.stories.contains(entry.$1) ||
+                        s.served < entry.$2.requiredServed
+                    ? null
+                    : () => _act(() => game.story(entry.$1)),
+                child: Text(
+                  s.stories.contains(entry.$1)
+                      ? 'Selesai'
+                      : s.served < entry.$2.requiredServed
+                      ? 'Layani ${entry.$2.requiredServed} pesanan'
+                      : entry.$2.choice,
+                ),
+              ),
+            ],
+          ),
+        ),
+      for (final g in GameEngine.goalTargets.indexed)
+        _card(
+          Row(
+            children: [
+              Expanded(
+                child: Text('Layani ${g.$2} pesanan · ${s.served}/${g.$2}'),
+              ),
+              FilledButton(
+                onPressed: s.served < g.$2 || s.claimedGoals.contains(g.$1)
+                    ? null
+                    : () => _act(() => game.claimGoal(g.$1)),
+                child: Text(
+                  s.claimedGoals.contains(g.$1)
+                      ? 'Diklaim'
+                      : '+${(g.$1 + 1) * 75} koin',
+                ),
+              ),
+            ],
           ),
         ),
     ],
@@ -1312,88 +1010,35 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
   Widget _data() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      if (widget.accountPanel != null) ...[
-        widget.accountPanel!,
-        const SizedBox(height: 20),
-      ],
-      _card(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Cadangan perangkat',
-              style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Progres tersimpan otomatis. Salin cadangan sebelum membersihkan data browser atau pindah perangkat.',
-              style: TextStyle(fontSize: 13, color: muted, height: 1.7),
-            ),
-            const SizedBox(height: 18),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                FilledButton.icon(
-                  onPressed: () async {
-                    try {
-                      await Clipboard.setData(ClipboardData(text: s.encode()));
-                      _toast(
-                        'Cadangan disalin. Simpan sebagai teks di tempat aman.',
-                      );
-                    } catch (_) {
-                      _showExport();
-                    }
-                  },
-                  icon: const Icon(Icons.copy_rounded, size: 17),
-                  label: const Text('Salin cadangan'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _restore,
-                  icon: const Icon(Icons.restore_rounded, size: 17),
-                  label: const Text('Pulihkan'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              saveStatus,
-              style: const TextStyle(fontSize: 12, color: muted),
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 20),
-      _notice(
-        'My Cloud Café · 0.1.0',
-        'Game single-player. Semua konten dibuka melalui permainan. Tidak ada transaksi uang asli.',
-        Icons.coffee_outlined,
+      if (widget.accountPanel != null) widget.accountPanel!,
+      const SizedBox(height: 16),
+      Text(saveStatus, style: const TextStyle(color: muted, fontSize: 12)),
+      const SizedBox(height: 16),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          FilledButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: s.encode()));
+              _toast('Cadangan disalin.');
+            },
+            icon: const Icon(Icons.copy),
+            label: const Text('Salin cadangan'),
+          ),
+          OutlinedButton(onPressed: _restore, child: const Text('Pulihkan')),
+        ],
       ),
     ],
-  );
-  void _showExport() => showDialog<void>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Cadangan progres'),
-      content: SizedBox(
-        width: 500,
-        child: SingleChildScrollView(child: SelectableText(s.encode())),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Tutup'),
-        ),
-      ],
-    ),
   );
   Future<void> _restore() async {
     final input = TextEditingController();
     String? error;
     await showDialog<void>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, update) => AlertDialog(
+      useRootNavigator: false,
+      builder: (c) => StatefulBuilder(
+        builder: (c, update) => AlertDialog(
           title: const Text('Pulihkan cadangan'),
           content: SizedBox(
             width: 440,
@@ -1401,15 +1046,14 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Progres perangkat saat ini akan diganti. Salin cadangan terlebih dahulu.',
-                  style: TextStyle(color: muted, fontSize: 13),
+                  'Progres saat ini akan diganti. Salin cadangan terlebih dahulu.',
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 TextField(
                   controller: input,
-                  maxLines: 6,
+                  maxLines: 5,
                   decoration: InputDecoration(
-                    labelText: 'Tempel teks cadangan',
+                    labelText: 'Teks cadangan',
                     errorText: error,
                   ),
                 ),
@@ -1418,7 +1062,7 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(c),
               child: const Text('Batal'),
             ),
             FilledButton(
@@ -1427,9 +1071,9 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
                   final restored = CafeState.decode(input.text);
                   game.state = restored;
                   game.resume();
-                  _save();
-                  Navigator.pop(context);
-                  _toast('Cadangan dipulihkan.');
+                  selectedOrder = null;
+                  unawaited(_save());
+                  Navigator.pop(c);
                 } catch (_) {
                   update(
                     () => error = 'Cadangan tidak valid. Progres tetap aman.',
@@ -1445,152 +1089,40 @@ class _GameShellState extends State<GameShell> with WidgetsBindingObserver {
     input.dispose();
   }
 
-  Widget _catalogGrid(List<Widget> children, {String? intro}) => LayoutBuilder(
-    builder: (context, b) {
-      final columns = b.maxWidth >= 1050
-          ? 3
-          : b.maxWidth >= 600
-          ? 2
-          : 1;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (intro != null) ...[
-            Text(
-              intro,
-              style: const TextStyle(color: muted, fontSize: 13, height: 1.7),
-            ),
-            const SizedBox(height: 22),
-          ],
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            children: children
-                .map(
-                  (child) => SizedBox(
-                    width: (b.maxWidth - 16 * (columns - 1)) / columns,
-                    child: child,
-                  ),
-                )
-                .toList(),
-          ),
-        ],
-      );
-    },
+  Widget _help() => const Text(
+    '1. Ketuk pelanggan atau kartu pesanan di atas.\n\n2. Ketuk alat yang diminta, tunggu bahan selesai, lalu ketuk alat untuk bahan berikutnya. Contoh latte: mesin espresso + milk steamer + Sajikan.\n\n3. Buka Menu untuk mempelajari dan mengatur resep. Setiap resep selesai dalam 5–12 detik waktu pembuatan aktif.\n\n4. Beli perabot di Toko, lalu ketuk ubin kosong. Kursi harus di sebelah meja. Alat hanya bisa diletakkan di meja bar, meja kayu, atau meja kerja kosong.\n\n5. Aktifkan Atur ruang. Tahan perabot atau alat, lalu seret dan lepaskan di tujuan. Kamu juga bisa mengetuk perabot untuk memilih koordinat.\n\n6. Cubit dengan dua jari untuk zoom. Seret ruang untuk menggeser kamera; sudut pandang tidak berputar.\n\n7. Rekrut maksimal 3 staf. Atur tugas dan beri istirahat saat energinya habis. Kamu selalu bisa menyiapkan bahan dan menyajikan sendiri.',
+    style: TextStyle(height: 1.7, fontSize: 14),
   );
-  Widget _card({required Widget child, double padding = 20}) => Material(
+  Widget _card(Widget child) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F3E9),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Material(type: MaterialType.transparency, child: child),
+    ),
+  );
+  Widget _glass({required Widget child}) => Material(
+    color: const Color(0xFAFFFDF6),
+    elevation: 2,
+    shadowColor: const Color(0x20314A36),
+    borderRadius: BorderRadius.circular(16),
     clipBehavior: Clip.antiAlias,
-    color: const Color(0xFFFFFDF8),
-    shape: RoundedRectangleBorder(
-      side: const BorderSide(color: Color(0xFFE3E5D9)),
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: Padding(padding: EdgeInsets.all(padding), child: child),
+    child: child,
   );
-  Widget _section(String title, String subtitle, {Widget? action}) => Row(
-    children: [
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 21,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -.4,
-              ),
-            ),
-            const SizedBox(height: 5),
-            Text(subtitle, style: const TextStyle(fontSize: 11, color: muted)),
-          ],
-        ),
-      ),
-      ?action,
-    ],
-  );
-  Widget _smallStat(String label, String value) => Row(
-    children: [
-      Expanded(
-        child: Text(label, style: const TextStyle(color: muted, fontSize: 12)),
-      ),
-      Text(
-        value,
-        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-      ),
-    ],
-  );
-  Widget _notice(String title, String subtitle, IconData icon) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(17),
-    decoration: BoxDecoration(
-      color: const Color(0xFFEAF0E4),
-      borderRadius: BorderRadius.circular(16),
-    ),
-    child: Row(
-      children: [
-        Icon(icon, color: sage, size: 25),
-        const SizedBox(width: 13),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: const TextStyle(fontSize: 12, color: muted, height: 1.5),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
-  );
-  Widget _art(String symbol, Color bg) => Container(
-    height: 118,
-    width: double.infinity,
-    decoration: BoxDecoration(
-      color: bg,
-      borderRadius: BorderRadius.circular(14),
-    ),
-    alignment: Alignment.center,
-    child: Text(
-      symbol,
-      style: const TextStyle(fontFamily: 'CafeEmoji', fontSize: 54),
-    ),
-  );
-  Widget _iconArt(IconData icon) => Container(
-    height: 110,
-    width: double.infinity,
-    decoration: BoxDecoration(
-      color: const Color(0xFFE8EEE2),
-      borderRadius: BorderRadius.circular(14),
-    ),
-    child: Icon(icon, size: 55, color: sage),
-  );
-  Widget _stat(String title, String value, IconData icon) => SizedBox(
-    width: 220,
-    child: _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: sage),
-          const SizedBox(height: 17),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 27, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 6),
-          Text(title, style: const TextStyle(fontSize: 12, color: muted)),
-        ],
-      ),
-    ),
-  );
+}
+
+class _Portrait extends CustomPainter {
+  final int look;
+  _Portrait(this.look);
+  @override
+  void paint(Canvas c, Size size) {
+    PeoplePainter.person(c, Offset(size.width / 2, 64), look, 0);
+  }
+
+  @override
+  bool shouldRepaint(covariant _Portrait old) => look != old.look;
 }
